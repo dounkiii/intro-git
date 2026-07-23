@@ -1,0 +1,50 @@
+{
+  "enjou": [
+    {
+      "id": "sample-e1",
+      "text": "大手飲食チェーンの新CMが不適切だと批判殺到。企業は公式サイトで謝罪コメントを発表しました。#炎上",
+      "author": "news_sample_a",
+      "author_verified": true,
+      "likes": 5200,
+      "retweets": 1800,
+      "replies": 640,
+      "created_at": "2026-07-22T09:00:00Z",
+      "url": "https://twitter.com/i/web/status/sample-e1"
+    },
+    {
+      "id": "sample-e2",
+      "text": "あるゲーム会社のアップデートが改悪だとユーザーから批判が集中。運営が仕様を一部撤回すると発表しました。",
+      "author": "game_media_sample",
+      "author_verified": true,
+      "likes": 3100,
+      "retweets": 950,
+      "replies": 410,
+      "created_at": "2026-07-22T11:30:00Z",
+      "url": "https://twitter.com/i/web/status/sample-e2"
+    }
+  ],
+  "tax": [
+    {
+      "id": "sample-t1",
+      "text": "来年度の税制改正案が公表。所得控除の見直しで手取りがどう変わるか、専門家が解説しています。#税金 #増税",
+      "author": "gov_econ_sample",
+      "author_verified": true,
+      "likes": 8800,
+      "retweets": 4200,
+      "replies": 1200,
+      "created_at": "2026-07-23T08:00:00Z",
+      "url": "https://twitter.com/i/web/status/sample-t1"
+    },
+    {
+      "id": "sample-t2",
+      "text": "インボイス制度に関する新しい経過措置が発表されました。個人事業主への影響を整理します。#確定申告 #インボイス",
+      "author": "tax_accountant_sample",
+      "author_verified": true,
+      "likes": 2400,
+      "retweets": 1100,
+      "replies": 300,
+      "created_at": "2026-07-23T07:15:00Z",
+      "url": "https://twitter.com/i/web/status/sample-t2"
+    }
+  ]
+}

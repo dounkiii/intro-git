@@ -1,0 +1,47 @@
+# パイプラインの動作設定（コードを変更せずここで調整）
+
+collection:
+  # X API の検索クエリ。lang:ja で日本語、-is:retweet でRT除外。
+  # 炎上・税金に関するトピックを対象にする。
+  queries:
+    enjou: '(炎上 OR 批判殺到 OR 謝罪) lang:ja -is:retweet'
+    tax:   '(増税 OR 減税 OR 税金 OR 確定申告 OR インボイス) lang:ja -is:retweet'
+  max_results_per_query: 25   # X API の recent search は 10-100
+  min_likes: 100              # ノイズ除去のための最低いいね数
+  min_retweets: 20
+
+classification:
+  # トピック判定と話題度スコアの重み
+  weights:
+    likes: 0.3
+    retweets: 0.5
+    replies: 0.2
+  # スコアがこの値以上のものだけを採用
+  score_threshold: 200
+
+safety:
+  # 個人名を名指ししたコンテンツをブロック（誤情報・名誉毀損リスク回避）
+  block_personal_targeting: true
+  # 未確認の断定表現を検出したら警告フラグを付与
+  flag_unverified_claims: true
+  # 収集元として信頼するアカウント種別（優先）
+  prefer_verified_sources: true
+
+video:
+  width: 1080
+  height: 1920        # 縦型 9:16 (TikTok)
+  max_duration_sec: 55
+  slides_per_video: 5
+  background_color: '#0f172a'
+  text_color: '#f8fafc'
+  accent_color: '#38bdf8'
+  tts_lang: 'ja'
+
+publishing:
+  # 投稿時のプライバシー。未審査アプリは SELF_ONLY のみ許可される。
+  privacy_level: 'SELF_ONLY'   # SELF_ONLY | MUTUAL_FOLLOW_FRIENDS | PUBLIC_TO_EVERYONE
+  disable_comment: false
+  disable_duet: false
+  disable_stitch: false
+  # ハッシュタグ（動画説明に付与）
+  hashtags: ['#ニュース', '#解説', '#時事']

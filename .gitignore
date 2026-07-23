@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+data/output/*.mp4
+data/output/*.mp3
+data/output/*.png
+data/output/*.json
+data/review_queue/*.json
+!data/review_queue/.gitkeep
+!data/output/.gitkeep
+.pytest_cache/
+.DS_Store

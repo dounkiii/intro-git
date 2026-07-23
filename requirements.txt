@@ -1,0 +1,15 @@
+# --- Core ---
+requests>=2.31
+python-dotenv>=1.0
+PyYAML>=6.0
+
+# --- Video generation ---
+Pillow>=10.0        # スライド画像生成
+gTTS>=2.5           # 音声合成 (オンライン, 無料). 代替: pyttsx3 (オフライン)
+# ffmpeg はOSパッケージで別途インストールが必要 (moviepy/subprocess から利用)
+
+# --- Optional: LLM 要約 ---
+# openai>=1.0
+
+# --- Dev ---
+pytest>=8.0
