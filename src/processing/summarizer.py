@@ -12,7 +12,12 @@ from ..models import Topic, VideoScript
 
 logger = logging.getLogger(__name__)
 
-CATEGORY_LABEL = {"enjou": "今話題のニュース", "tax": "税金ニュース解説"}
+CATEGORY_LABEL = {
+    "tax": "税金ニュース解説",
+    "money": "お金の話",
+    "nisa": "投資・NISA",
+    "enjou": "今話題のニュース",
+}
 
 
 class Summarizer:

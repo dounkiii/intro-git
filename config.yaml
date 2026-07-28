@@ -1,11 +1,12 @@
 # パイプラインの動作設定（コードを変更せずここで調整）
 
 collection:
-  # X API の検索クエリ。lang:ja で日本語、-is:retweet でRT除外。
-  # 炎上・税金に関するトピックを対象にする。
+  # X API の検索クエリ（任意）。lang:ja で日本語、-is:retweet でRT除外。
+  # 既定は「税金・お金」に特化。炎上ネタは法的リスクが高いため既定では扱わない。
+  # ※ X API は有料。API を使わず drafts コマンド（topics JSON）で運用するのが基本。
   queries:
-    enjou: '(炎上 OR 批判殺到 OR 謝罪) lang:ja -is:retweet'
-    tax:   '(増税 OR 減税 OR 税金 OR 確定申告 OR インボイス) lang:ja -is:retweet'
+    tax:   '(増税 OR 減税 OR 税金 OR 確定申告 OR インボイス OR 控除) lang:ja -is:retweet'
+    money: '(新NISA OR iDeCo OR 節税 OR 手取り OR 社会保険料 OR 資産運用) lang:ja -is:retweet'
   max_results_per_query: 25   # X API の recent search は 10-100
   min_likes: 100              # ノイズ除去のための最低いいね数
   min_retweets: 20
@@ -44,4 +45,9 @@ publishing:
   disable_duet: false
   disable_stitch: false
   # ハッシュタグ（動画説明に付与）
-  hashtags: ['#ニュース', '#解説', '#時事']
+  hashtags: ['#お金の勉強', '#節税', '#会社員']
+  # drafts コマンド用: カテゴリ別ハッシュタグ
+  hashtags_by_category:
+    money: ['#お金', '#節税', '#会社員', '#iDeCo', '#新NISA', '#お金の勉強']
+    tax:   ['#税金', '#確定申告', '#副業', '#節税', '#会社員', '#お金の勉強']
+    nisa:  ['#新NISA', '#投資', '#資産運用', '#お金の勉強', '#会社員']

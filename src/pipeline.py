@@ -11,7 +11,7 @@ import argparse
 import logging
 from pathlib import Path
 
-from .config import Config, OUTPUT_DIR
+from .config import Config, OUTPUT_DIR, ROOT
 from .collectors.twitter import TwitterCollector
 from .processing.classifier import Classifier
 from .processing.safety import SafetyChecker
@@ -19,6 +19,7 @@ from .processing.summarizer import Summarizer
 from .video.builder import VideoBuilder
 from .publishers.review_queue import ReviewQueue
 from .publishers.tiktok import TikTokPublisher
+from .drafts.generator import DraftGenerator, write_pack
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("pipeline")
@@ -75,6 +76,36 @@ def _cmd_run(args) -> None:
     Pipeline().run(limit=args.limit, use_sample=args.sample)
 
 
+def _cmd_drafts(args) -> None:
+    """topics/<日付>.json から下書き台本パックを生成し content/<日付>/ に出力。
+
+    有料 API 不要。Claude がリサーチした JSON さえあれば動く中核コマンド。
+    """
+    topics_path = Path(args.topics)
+    if not topics_path.is_absolute():
+        topics_path = ROOT / topics_path
+    if not topics_path.exists():
+        raise SystemExit(f"topics ファイルが見つかりません: {topics_path}")
+
+    date_stem = topics_path.stem
+    out_dir = Path(args.out) if args.out else (ROOT / "content" / date_stem)
+
+    cfg = Config.load()
+    pub = cfg.section("publishing")
+    hashtags = pub.get("hashtags_by_category") if isinstance(pub, dict) else None
+    generator = DraftGenerator(hashtags_by_category=hashtags)
+
+    packs = generator.generate_from_file(topics_path)
+    index_lines = [f"# {date_stem} の下書きパック（{len(packs)}本）\n"]
+    for pack in packs:
+        paths = write_pack(pack, out_dir)
+        print(f"生成: {paths['markdown']}")
+        index_lines.append(f"- [{pack.title_ideas[0]}](./{paths['markdown'].name})")
+
+    (out_dir / "README.md").write_text("\n".join(index_lines) + "\n", encoding="utf-8")
+    print(f"\n完了: {len(packs)} 本を {out_dir} に出力しました。")
+
+
 def _cmd_review(args) -> None:
     queue = ReviewQueue()
     if args.approve:
@@ -104,6 +135,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--limit", type=int, default=10)
     p_run.add_argument("--sample", action="store_true", help="サンプルデータで実行")
     p_run.set_defaults(func=_cmd_run)
+
+    p_dft = sub.add_parser("drafts", help="topics JSON から下書き台本パックを生成（API不要）")
+    p_dft.add_argument("--topics", required=True,
+                       help="例: data/topics/2026-07-28.json")
+    p_dft.add_argument("--out", default=None, help="出力先（既定: content/<日付>/）")
+    p_dft.set_defaults(func=_cmd_drafts)
 
     p_rev = sub.add_parser("review", help="レビューキュー操作")
     p_rev.add_argument("--list", dest="_list", action="store_true")
