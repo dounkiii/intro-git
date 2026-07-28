@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 from pathlib import Path
 
@@ -106,6 +107,27 @@ def _cmd_drafts(args) -> None:
     print(f"\n完了: {len(packs)} 本を {out_dir} に出力しました。")
 
 
+def _cmd_video(args) -> None:
+    """storyboard(JSON) から縦型ショート動画(mp4)を生成。
+
+    ffmpeg があれば mp4、無ければ絵コンテJSONにフォールバック。
+    TTS(gTTS) が入っていればナレーション音声、無ければ無音スライド動画になる。
+    """
+    from .models import VideoScript
+
+    sb_path = Path(args.storyboard)
+    if not sb_path.exists():
+        raise SystemExit(f"storyboard が見つかりません: {sb_path}")
+
+    data = json.loads(sb_path.read_text(encoding="utf-8"))
+    script = VideoScript(**data)
+
+    out_path = Path(args.out) if args.out else sb_path.with_suffix(".mp4")
+    builder = VideoBuilder(Config.load())
+    result = builder.build(script, out_path)
+    print(f"生成: {result}")
+
+
 def _cmd_review(args) -> None:
     queue = ReviewQueue()
     if args.approve:
@@ -141,6 +163,12 @@ def build_parser() -> argparse.ArgumentParser:
                        help="例: data/topics/2026-07-28.json")
     p_dft.add_argument("--out", default=None, help="出力先（既定: content/<日付>/）")
     p_dft.set_defaults(func=_cmd_drafts)
+
+    p_vid = sub.add_parser("video", help="storyboard JSON から縦型mp4を生成")
+    p_vid.add_argument("--storyboard", required=True,
+                       help="例: content/2026-07-28/ideco-2026-kaisei.storyboard.json")
+    p_vid.add_argument("--out", default=None, help="出力mp4パス（既定: 同名.mp4）")
+    p_vid.set_defaults(func=_cmd_video)
 
     p_rev = sub.add_parser("review", help="レビューキュー操作")
     p_rev.add_argument("--list", dest="_list", action="store_true")
