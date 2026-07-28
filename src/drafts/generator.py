@@ -79,8 +79,10 @@ class DraftPack:
 class DraftGenerator:
     """トピック → 下書きパック。テンプレートベースで決定論的（LLM 不要）。"""
 
-    def __init__(self, hashtags_by_category: dict[str, list[str]] | None = None):
+    def __init__(self, hashtags_by_category: dict[str, list[str]] | None = None,
+                 affiliate: dict[str, Any] | None = None):
         self.hashtags_by_category = hashtags_by_category or DEFAULT_HASHTAGS
+        self.affiliate = affiliate or {}
 
     # ------------------------------------------------------------------ public
     def generate(self, topic: Topic) -> DraftPack:
@@ -179,6 +181,10 @@ class DraftGenerator:
             lines.append("【参考・出典（一次情報）】")
             for s in topic.sources:
                 lines.append(f"・{s.get('title', '')}\n{s.get('url', '')}")
+        aff = self._affiliate_block()
+        if aff:
+            lines.append("")
+            lines.append(aff)
         if topic.disclaimers:
             lines.append("")
             lines.append("【ご注意】")
@@ -187,6 +193,21 @@ class DraftGenerator:
         lines.append("")
         lines.append(" ".join(hashtags))
         return "\n".join(lines).strip()
+
+    def _affiliate_block(self) -> str:
+        """概要欄に入れるアフィリエイト導線。URL 未設定はプレースホルダで表示。"""
+        links = self.affiliate.get("links") or []
+        if not links:
+            return ""
+        disclosure = self.affiliate.get(
+            "disclosure", "この概要には広告(アフィリエイトリンク)が含まれます #PR"
+        )
+        out = [f"【関連リンク】（{disclosure}）"]
+        for item in links:
+            label = item.get("label", "リンク")
+            url = item.get("url") or "▶ ここにあなたのアフィリリンクを貼る"
+            out.append(f"{label}\n{url}")
+        return "\n".join(out)
 
     def _thumbnail_text(self, topic: Topic) -> str:
         if topic.key_points:

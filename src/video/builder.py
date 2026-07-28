@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+import re
 import subprocess
 import tempfile
 import textwrap
@@ -32,8 +33,11 @@ class VideoBuilder:
         self.bg = v.get("background_color", "#0f172a")
         self.fg = v.get("text_color", "#f8fafc")
         self.accent = v.get("accent_color", "#38bdf8")
+        self.sub = v.get("sub_color", "#94a3b8")
         self.tts_lang = v.get("tts_lang", "ja")
         self.max_duration = int(v.get("max_duration_sec", 55))
+        self.handle = v.get("handle", "")          # 例: @your_handle（画面下に表示）
+        self.footer_note = v.get("footer_note", "※投資は自己責任・税制は要確認")
 
     def build(self, script: VideoScript, out_path: Path) -> Path:
         """動画を生成して out_path (mp4) を返す。失敗時は storyboard(json) を返す。"""
@@ -64,7 +68,8 @@ class VideoBuilder:
                 zip(script.slides, script.narration)
             ):
                 img_path = tmpdir / f"slide_{i:02d}.png"
-                self._draw_slide(img_path, slide, i, Image, ImageDraw, ImageFont)
+                self._draw_slide(img_path, slide, i, len(script.slides),
+                                 Image, ImageDraw, ImageFont)
 
                 # 音声（無ければ無音3秒）
                 dur = 3.0
@@ -91,23 +96,80 @@ class VideoBuilder:
         logger.info("動画を生成しました: %s", out_path)
         return out_path
 
-    def _draw_slide(self, path: Path, text: str, index: int,
+    def _draw_slide(self, path: Path, text: str, index: int, total: int,
                     Image, ImageDraw, ImageFont) -> None:
         img = Image.new("RGB", (self.width, self.height), self.bg)
         draw = ImageDraw.Draw(img)
-        font = self._load_font(ImageFont, size=64 if index else 80)
 
-        wrapped = "\n".join(textwrap.wrap(text, width=14))
-        # ざっくり中央寄せ
-        bbox = draw.multiline_textbbox((0, 0), wrapped, font=font, spacing=20)
+        is_hook = index == 0
+        is_cta = index == total - 1
+        is_point = bool(re.match(r"^\d+[\.\．]", text.strip()))
+        role = "POINT" if is_point else ("HOOK" if is_hook else ("NEXT" if is_cta else "SUMMARY"))
+
+        # 上部プログレスバー（何枚目か）
+        self._progress_bar(draw, index, total)
+
+        # 役割チップ（左上）
+        self._role_chip(draw, ImageFont, role)
+
+        # 本文（強調色は hook/CTA/まとめ、要点は白）
+        main_color = self.fg if is_point else self.accent
+        font_size = 76 if (is_hook or is_cta) else 66
+        font = self._load_font(ImageFont, size=font_size)
+        wrapped = "\n".join(textwrap.wrap(text.replace("\n", " "), width=13))
+        bbox = draw.multiline_textbbox((0, 0), wrapped, font=font, spacing=22)
         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
         x = (self.width - tw) / 2
         y = (self.height - th) / 2
-        # タイトルスライドはアクセント色
-        color = self.accent if index == 0 else self.fg
-        draw.multiline_text((x, y), wrapped, font=font, fill=color,
-                            align="center", spacing=20)
+        draw.multiline_text((x, y), wrapped, font=font, fill=main_color,
+                            align="center", spacing=22)
+
+        # 本文下のアクセント下線
+        underline_y = y + th + 40
+        draw.rectangle(
+            [(self.width / 2 - 90, underline_y), (self.width / 2 + 90, underline_y + 8)],
+            fill=self.accent,
+        )
+
+        # フッター（ハンドル + 注意書き）
+        self._footer(draw, ImageFont)
         img.save(path)
+
+    def _progress_bar(self, draw, index: int, total: int) -> None:
+        margin, h, top = 60, 10, 70
+        full = self.width - margin * 2
+        draw.rounded_rectangle([(margin, top), (margin + full, top + h)],
+                               radius=h // 2, fill=self.bg_line())
+        if total > 1:
+            w = full * (index + 1) / total
+            draw.rounded_rectangle([(margin, top), (margin + w, top + h)],
+                                   radius=h // 2, fill=self.accent)
+
+    def _role_chip(self, draw, ImageFont, role: str) -> None:
+        font = self._load_font(ImageFont, size=34)
+        pad_x, pad_y, top, left = 26, 14, 120, 60
+        bbox = draw.textbbox((0, 0), role, font=font)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        draw.rounded_rectangle(
+            [(left, top), (left + tw + pad_x * 2, top + th + pad_y * 2)],
+            radius=16, fill=self.accent,
+        )
+        draw.text((left + pad_x, top + pad_y - bbox[1]), role, font=font, fill=self.bg)
+
+    def _footer(self, draw, ImageFont) -> None:
+        font = self._load_font(ImageFont, size=34)
+        parts = [p for p in (self.handle, self.footer_note) if p]
+        if not parts:
+            return
+        text = "   ".join(parts)
+        bbox = draw.textbbox((0, 0), text, font=font)
+        tw = bbox[2] - bbox[0]
+        draw.text(((self.width - tw) / 2, self.height - 150), text,
+                  font=font, fill=self.sub)
+
+    @staticmethod
+    def bg_line() -> str:
+        return "#1e293b"
 
     @staticmethod
     def _load_font(ImageFont, size: int):

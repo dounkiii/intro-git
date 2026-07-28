@@ -36,7 +36,10 @@ video:
   background_color: '#0f172a'
   text_color: '#f8fafc'
   accent_color: '#38bdf8'
+  sub_color: '#94a3b8'
   tts_lang: 'ja'
+  handle: ''                    # 例: '@your_handle'（動画下部に表示）
+  footer_note: '※投資は自己責任・税制は要確認'
 
 publishing:
   # 投稿時のプライバシー。未審査アプリは SELF_ONLY のみ許可される。
@@ -51,3 +54,16 @@ publishing:
     money: ['#お金', '#節税', '#会社員', '#iDeCo', '#新NISA', '#お金の勉強']
     tax:   ['#税金', '#確定申告', '#副業', '#節税', '#会社員', '#お金の勉強']
     nisa:  ['#新NISA', '#投資', '#資産運用', '#お金の勉強', '#会社員']
+
+# アフィリエイト導線（概要欄に自動挿入）。
+# ※ 日本のステマ規制対応: 紹介リンクがある動画は必ず「#PR」等の表記が必要。
+#    label / url を自分のアフィリリンクに置き換えて使う。空なら挿入されない。
+affiliate:
+  disclosure: 'この概要には広告(アフィリエイトリンク)が含まれます #PR'
+  links:
+    - label: '【証券口座】新NISAを始めるなら'
+      url: ''      # 例: 楽天証券/SBI証券のアフィリリンク
+    - label: '【ふるさと納税】実質2000円で返礼品'
+      url: ''
+    - label: '【書籍】お金の基本が学べる一冊'
+      url: ''

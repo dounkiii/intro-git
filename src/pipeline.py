@@ -94,7 +94,8 @@ def _cmd_drafts(args) -> None:
     cfg = Config.load()
     pub = cfg.section("publishing")
     hashtags = pub.get("hashtags_by_category") if isinstance(pub, dict) else None
-    generator = DraftGenerator(hashtags_by_category=hashtags)
+    generator = DraftGenerator(hashtags_by_category=hashtags,
+                               affiliate=cfg.section("affiliate"))
 
     packs = generator.generate_from_file(topics_path)
     index_lines = [f"# {date_stem} の下書きパック（{len(packs)}本）\n"]
