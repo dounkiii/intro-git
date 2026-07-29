@@ -279,7 +279,7 @@
   /* スワイプ */
   .swipe-area{display:flex;justify-content:center;min-height:440px;align-items:flex-start}
   .profile-card{width:100%;max-width:340px;background:var(--lvcard);border-radius:22px;overflow:hidden;box-shadow:0 12px 30px rgba(0,0,0,.12);border:1px solid var(--lvline)}
-  .pc-photo{height:300px;background:linear-gradient(160deg,var(--pc,#ffd0e0),#fff);display:flex;align-items:flex-end;justify-content:center;overflow:hidden}
+  .pc-photo{height:360px;background:linear-gradient(160deg,var(--pc,#ffd0e0),#fff);display:flex;align-items:flex-end;justify-content:center;overflow:hidden}
   .pc-photo .face{width:88%;height:112%;transform:translateY(6%)}
   .pc-body{padding:14px 16px 18px}
   .pc-name{font-size:1.5rem;font-weight:900} .pc-name span{font-size:1rem;color:var(--lvmut);font-weight:600;margin-left:6px}
@@ -320,7 +320,7 @@
   .chat-scene.scene-night{background:linear-gradient(180deg,#2a2350,#4a3a6a)}
   .chat-scene.scene-ending{background:linear-gradient(180deg,#ffd9e6,#ffc0d8)}
   .chat-scene.scene-night .cnarr{color:#e0d8ff}
-  .chat-hero-big{position:sticky;top:0;width:150px;height:150px;margin:0 auto 6px;border-radius:16px;overflow:hidden}
+  .chat-hero-big{position:sticky;top:0;width:150px;height:200px;margin:0 auto 6px;border-radius:16px;overflow:hidden}
   .chat-hero-big .face{width:100%;height:120%}
   .cbub{display:flex;gap:8px;margin-bottom:10px;align-items:flex-end}
   .cbub.me{flex-direction:row-reverse}
@@ -337,6 +337,11 @@
   .chat-choice.quiz{border-style:solid;background:#f0f7ff;border-color:#bcd8f5;font-family:inherit}
   .chat-choice.quiz:hover:not(:disabled){background:#e0eeff}
   .chat-quiz-q{background:#fff3d6;border:1px solid #ffe0a0;border-radius:12px;padding:10px 14px;font-weight:700;font-size:.9rem;color:#7a5a20}
+  /* 生成イラスト(画像)の表示 */
+  .hero-img{display:block}
+  .lv-ava .face-img,.mm-face .face-img,.chat-ava .face-img,.cbub-ava .face-img{width:100%;height:100%;object-fit:cover;object-position:center center}
+  .pc-photo .portrait-img{width:100%;height:100%;object-fit:cover;object-position:center 26%}
+  .chat-hero-big .portrait-img{width:100%;height:100%;object-fit:cover;object-position:center 24%}
 </style>
 </head>
 <body>
@@ -685,6 +690,7 @@
 <script src="rush.js"></script>
 <script src="exam.js"></script>
 <script src="cli.js"></script>
+<script src="heroimg.js"></script>
 <script src="love.js"></script>
 </body>
 </html>

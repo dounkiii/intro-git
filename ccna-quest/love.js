@@ -181,6 +181,16 @@ const DECOYS = [
   { id: "d3", name: "ボーグ", age: 40, job: "レガシー機器", bio: "拙者、Telnetでしか喋れぬ。暗号化? 何それ美味しいの。", face: { skin: "#cfc0b0", hair: "#888", hair2: "#666", eyes: "#556", hairstyle: "short", accessory: "glasses", outfit: "#607080" }, decoy: "平文通信は危険…SSHの時代だよ。スキップ。" },
 ];
 
+/* ヒロインの顔/立ち絵: 生成イラストがあれば画像、無ければSVGにフォールバック */
+function heroFace(h, mood) {
+  const im = (typeof HERO_IMAGES !== "undefined") && h && HERO_IMAGES[h.id];
+  return im ? `<img class="hero-img face-img" src="${im.f}" alt="${h.name}">` : Art.face(h.face, mood || "happy");
+}
+function heroPortrait(h, mood) {
+  const im = (typeof HERO_IMAGES !== "undefined") && h && HERO_IMAGES[h.id];
+  return im ? `<img class="hero-img portrait-img" src="${im.p}" alt="${h.name}">` : Art.face(h.face, mood || "normal");
+}
+
 const Love = {
   deck: [], route: null, hero: null, beatIdx: 0, playing: false,
 
@@ -197,7 +207,7 @@ const Love = {
         const done = S.love.done.includes(id);
         const hearts = "❤".repeat(Math.min(5, Math.ceil(aff / 20))) + "🤍".repeat(5 - Math.min(5, Math.ceil(aff / 20)));
         return `<div class="lv-match" onclick="Love.openChat('${id}')">
-          <div class="lv-ava">${Art.face(h.face, done ? "love" : "happy")}</div>
+          <div class="lv-ava">${heroFace(h, done ? "love" : "happy")}</div>
           <div class="lv-info"><b>${h.name} <small>${h.age}</small></b>
             <div class="lv-hearts">${hearts} ${done ? "💑 恋人" : ""}</div>
             <div class="lv-last muted">${h.tagline}</div></div></div>`;
@@ -224,7 +234,7 @@ const Love = {
     document.getElementById("swipe-actions").classList.remove("hidden");
     const c = this.deck[0];
     wrap.innerHTML = `<div class="profile-card">
-      <div class="pc-photo" style="--pc:${c.theme || '#94a3b8'}">${Art.face(c.face, "normal")}</div>
+      <div class="pc-photo" style="--pc:${c.theme || '#94a3b8'}">${heroPortrait(c, "normal")}</div>
       <div class="pc-body">
         <div class="pc-name">${c.name} <span>${c.age}</span></div>
         <div class="pc-job">💼 ${c.job}</div>
@@ -252,7 +262,7 @@ const Love = {
   },
   showMatch(c) {
     const m = document.getElementById("match-modal");
-    m.querySelector(".mm-face").innerHTML = Art.face(c.face, "happy");
+    m.querySelector(".mm-face").innerHTML = heroFace(c, "happy");
     m.querySelector(".mm-name").textContent = `${c.name} とマッチ！`;
     m.classList.remove("hidden");
     m.querySelector(".mm-chat").onclick = () => { m.classList.add("hidden"); this.openChat(c.id); };
@@ -266,7 +276,7 @@ const Love = {
     this.route = this.hero.route;
     this.beatIdx = S.love.beat[id] || 0;
     document.getElementById("chat-name").textContent = this.hero.name;
-    document.getElementById("chat-ava").innerHTML = Art.face(this.hero.face, "happy");
+    document.getElementById("chat-ava").innerHTML = heroFace(this.hero, "happy");
     document.getElementById("chat-log").innerHTML = "";
     document.getElementById("view-chat").style.setProperty("--theme", this.hero.theme);
     document.getElementById("chat-scene").className = "chat-scene";
@@ -288,7 +298,7 @@ const Love = {
     const row = document.createElement("div");
     row.className = "cbub " + side;
     if (side === "her") {
-      row.innerHTML = `<div class="cbub-ava">${Art.face(this.hero.face, mood || "normal")}</div><div class="cbub-txt">${text}</div>`;
+      row.innerHTML = `<div class="cbub-ava">${heroFace(this.hero, mood || "normal")}</div><div class="cbub-txt">${text}</div>`;
     } else {
       row.innerHTML = `<div class="cbub-txt">${text}</div>`;
     }
@@ -305,7 +315,7 @@ const Love = {
     document.getElementById("chat-scene").className = "chat-scene scene-" + s;
     // シーン切替時に大きめの立ち絵を表示
     const big = document.getElementById("chat-hero-big");
-    big.innerHTML = Art.face(this.hero.face, "happy");
+    big.innerHTML = heroPortrait(this.hero, "happy");
     big.classList.remove("hidden");
   },
 
@@ -427,7 +437,7 @@ const Love = {
     save();
     this.bubble("her", "…", b.m);
     const big = document.getElementById("chat-hero-big");
-    big.innerHTML = Art.face(this.hero.face, "love"); big.classList.remove("hidden");
+    big.innerHTML = heroPortrait(this.hero, "love"); big.classList.remove("hidden");
     this.narrate(b.end);
     const box = document.getElementById("chat-input");
     box.innerHTML = "";
