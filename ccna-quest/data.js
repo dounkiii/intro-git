@@ -4,7 +4,7 @@
  * すべてのデータはこのファイルに集約しています。
  * ===================================================================== */
 
-/* 出題領域 (公式ブループリントの比率) */
+/* 出題領域 (公式ブループリント v1.1 の比率) */
 const CCNA_DOMAINS = [
   { id: "fundamentals", name: "ネットワーク基礎",       weight: 20, icon: "🌐", color: "#38bdf8" },
   { id: "access",       name: "ネットワークアクセス",     weight: 20, icon: "🔀", color: "#a78bfa" },
@@ -13,6 +13,25 @@ const CCNA_DOMAINS = [
   { id: "security",     name: "セキュリティ基礎",         weight: 15, icon: "🛡️", color: "#f87171" },
   { id: "automation",   name: "自動化・プログラマビリティ", weight: 10, icon: "🤖", color: "#f472b6" },
 ];
+
+/* 難易度ラベル (1=初級 / 2=中級 / 3=本番レベル) */
+const DIFF_LABELS = { 1: "初級", 2: "中級", 3: "本番" };
+
+/* 試験の実情報 (模擬試験モードの説明に使用。合格ライン等は非公式値) */
+const EXAM_FACTS = {
+  code: "200-301",
+  version: "v1.1 (2024年8月〜)",
+  questionsReal: "本番は約100〜120問",
+  minutesReal: 120,
+  passNote: "合格ラインは非公開。歴史的に約825/1000(300〜1000スケール)と言われる目安",
+  style: "リニア形式（前の問題には戻れない）。単一選択・複数選択・ドラッグ&ドロップ・シミュレーションあり",
+};
+
+/* 問題スキーマ補足:
+ *   diff : 1|2|3 (難易度)
+ *   answer : 正解index。複数選択のときは配列 [i,j]
+ *   fig : 図解タイプ (Art.diagram に対応: topo_router / topo_lan / osi) 任意
+ */
 
 /* =====================================================================
  * クイズ問題バンク
@@ -323,6 +342,138 @@ const QUIZ_BANK = [
   },
 ];
 
+/* ---- 既存問題は基礎レベル(初級)として難易度を付与 ---- */
+QUIZ_BANK.forEach(q => { if (!q.diff) q.diff = 1; });
+
+/* =====================================================================
+ * 追加問題バンク (中級〜本番レベル / 一部は複数選択・図解つき)
+ * answer が配列のものは「2つ選べ」形式。
+ * ===================================================================== */
+QUIZ_BANK.push(
+  // ---- 基礎 (中級〜本番) ----
+  { domain: "fundamentals", diff: 1,
+    q: "/27 のサブネットで利用可能なホストアドレス数は？",
+    choices: ["30", "32", "62", "14"], answer: 0,
+    exp: "/27 はホストビット5 → 2^5=32アドレス。ネットワークとブロードキャストを除き 30 台が利用可能です。" },
+  { domain: "fundamentals", diff: 2,
+    q: "ホストに 192.168.10.100/26 が設定されている。所属するネットワークアドレスは？",
+    choices: ["192.168.10.0", "192.168.10.64", "192.168.10.96", "192.168.10.128"], answer: 1,
+    exp: "/26 はマスク255.255.255.192、ブロックサイズ64。.100 は 64〜127 の範囲なのでネットワークは .64(ブロードキャスト .127)です。" },
+  { domain: "fundamentals", diff: 3,
+    q: "【2つ選べ】UDPについて正しい記述はどれか？",
+    choices: ["3ウェイハンドシェイクでセッションを確立する", "コネクションレスでベストエフォート配送", "TCPよりヘッダオーバーヘッドが小さい", "順序制御を保証する"],
+    answer: [1, 2],
+    exp: "UDPはコネクションレス(ハンドシェイクなし)、ヘッダは8バイトでTCP(20バイト以上)より軽量。順序保証・再送はありません。" },
+  { domain: "fundamentals", diff: 3, fig: "topo_lan",
+    q: "アクセススイッチのポートで show interfaces を見ると input errors・CRC errors・runts が増え続けている。最も疑わしい原因は？",
+    choices: ["ホストのデフォルトゲートウェイ誤設定", "デュプレックス不一致またはケーブル不良", "DNSサーバの誤設定", "アウトバウンドACLの破棄"],
+    answer: 1,
+    exp: "CRC・runts・late collision は典型的なL1/L2の症状で、デュプレックス不一致やケーブル不良が原因。L3/名前解決/ACLの問題ではこれらのカウンタは増えません。" },
+
+  // ---- ネットワークアクセス ----
+  { domain: "access", diff: 2,
+    q: "RSTPで、同一セグメント上の指定ポートのバックアップとなるポートロールは？",
+    choices: ["ルートポート", "指定ポート", "代替(Alternate)ポート", "バックアップ(Backup)ポート"], answer: 3,
+    exp: "Backupポートは同一セグメント上の指定ポートのバックアップ。Alternateポートはルートへの代替経路のバックアップです。" },
+  { domain: "access", diff: 3,
+    q: "【2つ選べ】EtherChannelがLACPで正しく形成される組み合わせはどれか？",
+    choices: ["active / active", "active / passive", "passive / passive", "on / active"],
+    answer: [0, 1],
+    exp: "少なくとも片側がactiveならネゴシエーション成立。passive同士は誰も交渉を始めず不成立。onはネゴシエーションなしでactive/passiveとは組めません。" },
+  { domain: "access", diff: 3,
+    q: "SW-AのポートチャネルがモードON、SW-BがLACP activeのとき結果は？",
+    choices: ["LACPでチャネルが形成される", "PAgPで形成される", "EtherChannelは形成されない", "形成されるがsuspend状態"],
+    answer: 2,
+    exp: "ON はネゴシエーションを一切行わず、相手もONの時だけ束ねます。active/passiveと混在するとチャネルは形成されません。" },
+  { domain: "access", diff: 2,
+    q: "Lightweight AP がWLCへ制御/データトラフィックをトンネルするために使うプロトコルは？",
+    choices: ["LWAPPのみ", "CAPWAP", "GRE", "Telnet"], answer: 1,
+    exp: "CAPWAP(Control And Provisioning of Wireless Access Points)がLightweight APとWLC間の標準トンネルです。" },
+  { domain: "access", diff: 2, fig: "topo_lan",
+    q: "Router-on-a-Stick(1本のトランクで複数VLANをルーティング)で、各サブインタフェースに必要な設定は？",
+    choices: ["switchport mode trunk", "encapsulation dot1q <VLAN-ID> とIPアドレス", "no ip routing", "VLANごとに物理ケーブルを追加"], answer: 1,
+    exp: "各サブインタフェースに、対応VLANの802.1Qタグ(encapsulation dot1q)と、そのVLANのゲートウェイとなるIPアドレスを設定します。" },
+
+  // ---- IPコネクティビティ ----
+  { domain: "connectivity", diff: 2,
+    q: "同じ宛先プレフィックスをスタティック(AD1)・OSPF(AD110)・EIGRP(AD90)で学習した。ルーティングテーブルに載るのは？",
+    choices: ["OSPF", "EIGRP", "スタティック", "3つとも負荷分散"], answer: 2,
+    exp: "プレフィックス長が同じ場合はADが最小の経路が選ばれます。スタティック(AD1)が最優先です。" },
+  { domain: "connectivity", diff: 2,
+    q: "ルーティングテーブルに 10.1.1.0/24・10.1.0.0/16・0.0.0.0/0 がある。宛先 10.1.1.5 はどれで転送される？",
+    choices: ["10.1.1.0/24", "10.1.0.0/16", "0.0.0.0/0", "破棄される"], answer: 0,
+    exp: "AD/メトリックより先にロンゲストマッチ(最長一致)が優先。/24 が最も具体的なので選ばれます。" },
+  { domain: "connectivity", diff: 3, fig: "topo_router",
+    q: "【2つ選べ】イーサネットリンクで2台のOSPFv2ルータが隣接を確立するために一致が必要なものは？",
+    choices: ["Hello/Deadタイマー", "エリアID", "ルータID", "OSPFプロセスID"],
+    answer: [0, 1],
+    exp: "タイマー・エリアID・サブネット/マスク・MTU・認証は一致が必要。ルータIDは逆に一意である必要があり、プロセスIDはローカルな意味しかありません。" },
+  { domain: "connectivity", diff: 3,
+    q: "マルチアクセスのイーサネットに優先度1,1,0(ルータID 1.1.1.1/2.2.2.2/3.3.3.3)のOSPFルータがある。DRになるのは？",
+    choices: ["RID 1.1.1.1", "RID 2.2.2.2", "RID 3.3.3.3", "DRは選出されない"], answer: 1,
+    exp: "優先度が最高のルータが勝ち、優先度0は選出対象外。優先度1が2台あるので、ルータIDが大きい 2.2.2.2 がDRになります。" },
+  { domain: "connectivity", diff: 2,
+    q: "OSPFの既定リファレンス帯域(100Mbps)で、1Gbpsインタフェースのコストは？",
+    choices: ["1", "10", "100", "64"], answer: 0,
+    exp: "コスト = 100Mbps / 1000Mbps = 0.1 → 最小コスト1に切り上げ。高速リンクを区別するにはreference-bandwidthの調整が必要です。" },
+  { domain: "connectivity", diff: 1,
+    q: "フローティングスタティックルート(バックアップ経路)はどう設定する？",
+    choices: ["メトリックを下げる", "ADを高く設定する", "ADを低く設定する", "帯域を上げる"], answer: 1,
+    exp: "フローティングスタティックはADを高く設定し、主経路(低AD)が消えたときだけルーティングテーブルに入るバックアップです。" },
+  { domain: "connectivity", diff: 3,
+    q: "IPv4のHSRPについて正しい記述は？",
+    choices: ["優先度が最も低いルータがActiveになる", "優先度(既定100)が最高、同値ならIPが大きい方がActive", "既定で両ルータが同時に転送する", "仮想MACは 0000.5E00.01xx"],
+    answer: 1,
+    exp: "優先度最高(既定100)、同値なら最大IPがActiveで、Activeのみ転送します。0000.5E00.01xx はVRRPの仮想MAC(HSRPv1は0000.0C07.ACxx)。" },
+  { domain: "connectivity", diff: 2,
+    q: "IPv6のデフォルトルートを表す構文は？",
+    choices: ["ip route 0.0.0.0 0.0.0.0 <nh>", "ipv6 route ::/0 <nh>", "ipv6 route ::1/128 <nh>", "ipv6 route FE80::/10 <nh>"], answer: 1,
+    exp: "::/0 が全宛先にマッチするIPv6デフォルトルート。::1/128はループバック、FE80::/10はリンクローカルです。" },
+
+  // ---- IPサービス ----
+  { domain: "services", diff: 2,
+    q: "NTPのstratum(ストラタム)値が示すものは？",
+    choices: ["時刻更新の暗号強度", "基準クロックからのホップ数(階層)", "ポーリング間隔(秒)", "UTCからのタイムゾーン差"], answer: 1,
+    exp: "stratumは基準クロックからの距離。stratum0=基準源、1=直結、以降ホップごとに+1。数字が小さいほど正確です。" },
+  { domain: "services", diff: 2,
+    q: "管理トラフィックの認証と暗号化の両方に対応するSNMPのバージョンは？",
+    choices: ["SNMPv1", "SNMPv2c", "SNMPv3", "SNMPv2"], answer: 2,
+    exp: "認証+暗号化(authPriv)はSNMPv3のみ。v1/v2cは平文のコミュニティストリングに依存します。" },
+  { domain: "services", diff: 2,
+    q: "QoSでレイヤ3(IPヘッダ)のトラフィック優先度をマークするフィールドは？",
+    choices: ["CoS", "DSCP", "MPLS EXP", "802.1p"], answer: 1,
+    exp: "DSCPはIPv4のToSバイト内6ビット(L3)。CoS/802.1pは802.1Qタグ内のL2マーキングです。" },
+
+  // ---- セキュリティ ----
+  { domain: "security", diff: 3,
+    q: "ベストプラクティス上、標準ACLはどこに配置すべき？",
+    choices: ["送信元にできるだけ近く", "宛先にできるだけ近く", "最も負荷の低いルータ", "経路上の全インタフェース"], answer: 1,
+    exp: "標準ACLは送信元IPしか見ないため、宛先の近くに置かないと他ネットワーク宛ての通信まで巻き込んで遮断してしまいます。拡張ACLは送信元近くに配置。" },
+  { domain: "security", diff: 3,
+    q: "【2つ選べ】TACACS+について正しい記述はどれか？",
+    choices: ["パケット内のパスワードのみ暗号化する", "パケット本体全体を暗号化する", "認証・認可・アカウンティングを分離できる", "UDPを使用する"],
+    answer: [1, 2],
+    exp: "TACACS+はCisco独自・TCP/49・ペイロード全体を暗号化し、AAAを分離できるため機器管理に最適。RADIUSはパスワードのみ暗号化しauthN/authZを結合します。" },
+  { domain: "security", diff: 3,
+    q: "Dynamic ARP Inspection(DAI)はARPパケットを何と照合して検証する？",
+    choices: ["スイッチのMACアドレステーブル", "DHCPスヌーピングのバインディングDB", "ローカルARPキャッシュ", "ルーティングテーブル"], answer: 1,
+    exp: "DAIはDHCPスヌーピングのIP-MACバインディング表と照合するため、先にDHCPスヌーピングが必要。ARPスプーフィング(中間者攻撃)を防ぎます。" },
+  { domain: "security", diff: 2,
+    q: "WPA3-Personalが、オフライン辞書攻撃対策としてWPA2のPSKハンドシェイクを置き換えた仕組みは？",
+    choices: ["TKIP", "SAE (Simultaneous Authentication of Equals)", "WEP", "EAP-TLS"], answer: 1,
+    exp: "WPA3-PersonalはSAE(Dragonfly)で4ウェイPSKハンドシェイクを置換。WPA2の暗号はAES-CCMP、EAP-TLSは802.1Xのエンタープライズ方式です。" },
+
+  // ---- 自動化 ----
+  { domain: "automation", diff: 2,
+    q: "エージェントレス(SSH利用)で、YAMLのプレイブックで自動化を定義する構成管理ツールは？",
+    choices: ["Puppet", "Chef", "Ansible", "SaltStack"], answer: 2,
+    exp: "Ansibleはエージェントレスかつプッシュ型でYAMLプレイブックを使用。Puppet/Chefはエージェント型・プル型です。" },
+  { domain: "automation", diff: 3,
+    q: "SDNアーキテクチャで『サウスバウンド』インタフェースがコントローラと接続する相手は？",
+    choices: ["業務アプリケーション", "ネットワーク機器(データプレーン)", "ノースバウンドREST API", "帯域外管理ネットワーク"], answer: 1,
+    exp: "サウスバウンドAPI(OpenFlow/NETCONF等)は機器へ指示を下ろす方向。ノースバウンドAPI(通常REST)はアプリ(DNA/Catalyst Center等)へ上向きに公開します。" },
+);
+
 /* =====================================================================
  * フラッシュカード (用語 → 意味)
  * ===================================================================== */
@@ -382,4 +533,9 @@ const ACHIEVEMENTS = [
   { id: "all_domains",  name: "全領域制覇",       desc: "全6領域のクイズを各1回クリア",   icon: "🌈" },
   { id: "flash_all",    name: "暗記王",           desc: "全フラッシュカードを確認",       icon: "🃏" },
   { id: "ports_perfect",name: "ポートの番人",     desc: "ポートゲームを全問正解",          icon: "🚪" },
+  { id: "adv_clear",    name: "ネット王国の勇者", desc: "アドベンチャーを全章クリア",      icon: "🗺️" },
+  { id: "exam_pass",    name: "模擬試験 合格",     desc: "模擬試験で合格ライン到達",        icon: "📜" },
+  { id: "rush30",       name: "スピードの申し子", desc: "サブネット・ラッシュで30問正解",  icon: "⚡" },
+  { id: "cli_first",    name: "コマンド入門",     desc: "コマンド道場を初クリア",          icon: "⌨️" },
+  { id: "cli_master",   name: "IOSマスター",      desc: "全コマンドシナリオをクリア",      icon: "🛠️" },
 ];

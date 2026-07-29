@@ -17,6 +17,11 @@ const DEFAULT_STATE = {
   flashSeen: [],           // 確認済みフラッシュカードindex
   domainsCleared: [],      // クリアした領域id
   achievements: [],        // 解除済みバッジid
+  adventure: { chapter: 0, stage: 0, hpBonus: 0, _replay: null }, // アドベンチャー進行
+  cliCleared: [],          // クリアしたCLIシナリオid
+  rushBest: 0,             // サブネット・ラッシュ自己ベスト
+  examTaken: 0,            // 模擬試験受験回数
+  examBest: 0,             // 模擬試験の最高スコア
 };
 
 let S = load();
@@ -24,9 +29,14 @@ let S = load();
 function load() {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
-    if (raw) return Object.assign({}, DEFAULT_STATE, JSON.parse(raw));
+    if (raw) {
+      const s = Object.assign({}, DEFAULT_STATE, JSON.parse(raw));
+      s.adventure = Object.assign({ chapter: 0, stage: 0, hpBonus: 0, _replay: null }, s.adventure || {});
+      return s;
+    }
   } catch (e) { /* ignore */ }
-  return Object.assign({}, DEFAULT_STATE);
+  const d = JSON.parse(JSON.stringify(DEFAULT_STATE));
+  return d;
 }
 function save() {
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) {}
@@ -85,7 +95,8 @@ function unlock(id) {
 }
 
 /* ---------------------- 画面遷移 ---------------------- */
-const VIEWS = ["home", "quiz-setup", "quiz", "subnet", "flash", "ports", "result"];
+const VIEWS = ["home", "quiz-setup", "quiz", "subnet", "flash", "ports", "result",
+  "adventure", "battle", "exam-setup", "exam", "exam-result", "rush", "cli-menu", "cli"];
 function go(view) {
   VIEWS.forEach(v => document.getElementById("view-" + v).classList.toggle("hidden", v !== view));
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -127,20 +138,24 @@ function domainName(id) {
  * クイズモード
  * ===================================================================== */
 const Quiz = {
-  queue: [], idx: 0, score: 0, combo: 0, correctCount: 0, domain: "random",
+  queue: [], idx: 0, score: 0, combo: 0, correctCount: 0, domain: "random", diff: "all",
 
   start() {
     const domSel = document.getElementById("quiz-domain").value;
+    const diffSel = document.getElementById("quiz-diff").value;
     const count = parseInt(document.getElementById("quiz-count").value, 10);
-    let pool = domSel === "random" ? QUIZ_BANK.slice() : QUIZ_BANK.filter(q => q.domain === domSel);
+    let pool = QUIZ_BANK.slice();
+    if (domSel !== "random") pool = pool.filter(q => q.domain === domSel);
+    if (diffSel !== "all") pool = pool.filter(q => q.diff === parseInt(diffSel, 10));
+    if (pool.length === 0) { toast("該当する問題がありません"); return; }
     pool = shuffle(pool).slice(0, count);
-    // 選択肢もシャッフルして正解indexを追従させる
     this.queue = pool.map(q => {
       const order = shuffle(q.choices.map((c, i) => i));
+      const ansArr = (Array.isArray(q.answer) ? q.answer : [q.answer]).map(a => order.indexOf(a));
       return {
-        q: q.q, exp: q.exp, domain: q.domain,
+        q: q.q, exp: q.exp, domain: q.domain, diff: q.diff, fig: q.fig,
         choices: order.map(i => q.choices[i]),
-        answer: order.indexOf(q.answer),
+        answer: ansArr, multi: Array.isArray(q.answer),
       };
     });
     this.idx = 0; this.score = 0; this.combo = 0; this.correctCount = 0; this.domain = domSel;
@@ -151,12 +166,15 @@ const Quiz = {
 
   render() {
     const item = this.queue[this.idx];
+    this._picked = new Set();
     document.getElementById("q-progress").textContent =
-      `${domainName(item.domain)} — 第${this.idx + 1}問 / ${this.queue.length}`;
+      `${domainName(item.domain)}・${DIFF_LABELS[item.diff]} — 第${this.idx + 1}問 / ${this.queue.length}`;
     document.getElementById("q-combo").textContent = this.combo;
     document.getElementById("q-score").textContent = this.score;
     document.getElementById("q-bar").style.width = (this.idx / this.queue.length * 100) + "%";
+    document.getElementById("q-fig").innerHTML = item.fig ? Art.diagram(item.fig) : "";
     document.getElementById("q-text").textContent = item.q;
+    document.getElementById("q-multi").classList.toggle("hidden", !item.multi);
 
     const box = document.getElementById("q-choices");
     box.innerHTML = "";
@@ -165,24 +183,41 @@ const Quiz = {
       const b = document.createElement("button");
       b.className = "choice";
       b.innerHTML = `<span class="key">${keys[i]}</span><span>${c}</span>`;
-      b.onclick = () => this.answer(i, b);
+      b.onclick = () => item.multi ? this.togglePick(i, b) : this.answer([i]);
       box.appendChild(b);
     });
     document.getElementById("q-exp").className = "exp";
     document.getElementById("q-next-row").classList.add("hidden");
+    // 複数選択なら「決定」ボタン、単一選択なら押した瞬間に判定
+    document.getElementById("q-confirm-row").classList.toggle("hidden", !item.multi);
+    if (item.multi) document.getElementById("q-confirm").disabled = true;
   },
 
-  answer(pick, btn) {
+  togglePick(i, btn) {
+    if (this._picked.has(i)) { this._picked.delete(i); btn.classList.remove("sel"); }
+    else { this._picked.add(i); btn.classList.add("sel"); }
+    document.getElementById("q-confirm").disabled = this._picked.size === 0;
+  },
+  confirmMulti() { this.answer([...this._picked]); },
+
+  answer(picked) {
     const item = this.queue[this.idx];
     const buttons = [...document.querySelectorAll("#q-choices .choice")];
     buttons.forEach(b => b.disabled = true);
+    document.getElementById("q-confirm-row").classList.add("hidden");
     const exp = document.getElementById("q-exp");
+    const correct = item.answer.slice().sort((a, b) => a - b);
+    const pick = picked.slice().sort((a, b) => a - b);
+    const ok = pick.length === correct.length && pick.every((v, k) => v === correct[k]);
 
-    if (pick === item.answer) {
-      btn.classList.add("correct");
-      this.combo += 1;
-      this.correctCount += 1;
-      const gained = 10 + Math.min(this.combo - 1, 10) * 2; // コンボボーナス
+    // 色付け
+    correct.forEach(i => buttons[i].classList.add("correct"));
+    pick.forEach(i => { if (!correct.includes(i)) buttons[i].classList.add("wrong"); });
+
+    if (ok) {
+      this.combo += 1; this.correctCount += 1;
+      const bonus = item.diff * 4; // 難しい問題ほど高得点
+      const gained = 10 + Math.min(this.combo - 1, 10) * 2 + bonus;
       this.score += gained;
       if (this.combo >= 2) popCombo(`${this.combo} COMBO! +${gained}XP`);
       if (this.combo > S.bestCombo) S.bestCombo = this.combo;
@@ -190,8 +225,6 @@ const Quiz = {
       exp.className = "exp ok show";
       exp.innerHTML = `<span class="tag">正解！ +${gained}XP</span>${item.exp}`;
     } else {
-      btn.classList.add("wrong");
-      buttons[item.answer].classList.add("correct");
       this.combo = 0;
       exp.className = "exp ng show";
       exp.innerHTML = `<span class="tag">不正解</span>${item.exp}`;
@@ -446,10 +479,25 @@ const Ports = {
  * ホーム画面の描画
  * ===================================================================== */
 const MODES = [
-  { emoji: "❓", title: "クイズチャレンジ", desc: "6領域の4択問題。コンボでXPアップ！", act: () => go("quiz-setup") },
-  { emoji: "🧮", title: "サブネット道場", desc: "無限に生成される計算問題で得点源を攻略", act: () => { go("subnet"); touchStreak(); Subnet.newQ(); } },
-  { emoji: "🃏", title: "フラッシュカード", desc: "重要用語をめくって暗記", act: () => Flash.start() },
-  { emoji: "🚪", title: "ポート&プロトコル", desc: "番号とプロトコルを繋ぐマッチゲーム", act: () => Ports.start() },
+  { emoji: "🗺️", title: "アドベンチャー", tag: "RPGバトル", feat: true,
+    desc: "パケットンを操作してモンスターと問題バトル。素早い正解でクリティカル！章を進めて全領域を制覇。",
+    act: () => { Adventure.renderMap(); go("adventure"); } },
+  { emoji: "📝", title: "模擬試験", tag: "本番形式",
+    desc: "本番同様の制限時間・リニア形式。1000点満点で採点し分野別に弱点を可視化。",
+    act: () => Exam.setup() },
+  { emoji: "⚡", title: "サブネット・ラッシュ", tag: "タイムアタック",
+    desc: "制限時間との戦い。高速でサブネット問題を解いてコンボと速度を上げろ！",
+    act: () => Rush.start() },
+  { emoji: "⌨️", title: "コマンド道場", tag: "CLIシミュレータ",
+    desc: "本物そっくりのCisco IOS端末で設定を練習。モード遷移も再現。",
+    act: () => { CLI.renderList(); go("cli-menu"); } },
+  { emoji: "🎯", title: "クイズ", tag: "難易度選択",
+    desc: "初級〜本番レベルを選んで4択演習。コンボでXPアップ。",
+    act: () => go("quiz-setup") },
+  { emoji: "🃏", title: "フラッシュカード", tag: "暗記",
+    desc: "重要用語をめくって暗記。", act: () => Flash.start() },
+  { emoji: "🚪", title: "ポート&プロトコル", tag: "ミニゲーム",
+    desc: "番号とプロトコルを繋ぐマッチゲーム。", act: () => Ports.start() },
 ];
 
 function renderModes() {
@@ -457,16 +505,24 @@ function renderModes() {
   grid.innerHTML = "";
   MODES.forEach(m => {
     const d = document.createElement("div");
-    d.className = "card mode";
-    d.innerHTML = `<div class="emoji">${m.emoji}</div><h3>${m.title}</h3><p>${m.desc}</p>`;
+    d.className = "card mode" + (m.feat ? " featured" : "");
+    d.innerHTML = `<div class="mode-top"><span class="emoji">${m.emoji}</span><span class="mode-tag">${m.tag}</span></div>
+      <h3>${m.title}</h3><p>${m.desc}</p>`;
     d.onclick = m.act;
     grid.appendChild(d);
   });
 
-  // クイズ設定の領域セレクト
+  // クイズ設定の領域・難易度セレクト
   const sel = document.getElementById("quiz-domain");
   sel.innerHTML = `<option value="random">🎲 ランダム(全領域)</option>` +
     CCNA_DOMAINS.map(d => `<option value="${d.id}">${d.icon} ${d.name} (${d.weight}%)</option>`).join("");
+  const dsel = document.getElementById("quiz-diff");
+  dsel.innerHTML = `<option value="all">全難易度</option>
+    <option value="1">初級</option><option value="2">中級</option><option value="3">本番レベル</option>`;
+
+  // マスコット挨拶
+  const mascot = document.getElementById("mascot");
+  if (mascot) mascot.innerHTML = Art.hero("happy");
 }
 
 function renderStats() {
