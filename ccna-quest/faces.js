@@ -67,6 +67,11 @@ Art.face = function (style, mood = "normal", opts = {}) {
     const r = Math.max(0, (n >> 16 & 255) - 40), g = Math.max(0, (n >> 8 & 255) - 40), b = Math.max(0, (n & 255) - 30);
     return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
   };
+  const light = (hex) => { // 髪のツヤ用に明るく
+    const n = parseInt(hex.slice(1), 16);
+    const r = Math.min(255, (n >> 16 & 255) + 70), g = Math.min(255, (n >> 8 & 255) + 70), b = Math.min(255, (n & 255) + 70);
+    return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+  };
 
   const mouth = {
     normal:    `<path d="M92 148 q8 6 16 0" stroke="#b5566a" stroke-width="2.5" fill="none" stroke-linecap="round"/>`,
@@ -85,6 +90,12 @@ Art.face = function (style, mood = "normal", opts = {}) {
 
   // ---- 髪型 (背面 + 前髪) ----
   const H = hairShapes(s.hairstyle, s.hair, s.hair2);
+  const hi = light(s.hair);   // 髪のツヤ用ハイライト色
+  // 髪ツヤ(前髪の上に光沢) + 前髪の落ち影(額) — 塗りっぽさを出す
+  const hairGloss = `<path d="M60 60 Q100 48 140 62 Q126 56 100 56 Q74 56 60 60 Z" fill="${hi}" opacity=".55"/>
+    <ellipse cx="118" cy="64" rx="14" ry="5" fill="${hi}" opacity=".45" transform="rotate(-12 118 64)"/>`;
+  const fringeShadow = `<path d="M52 92 Q100 108 148 92 Q140 110 100 112 Q60 110 52 92 Z" fill="#000" opacity=".07"/>`;
+  const faceShade = `<path d="M136 96 C150 108 150 150 118 176 C140 150 138 118 130 100 Z" fill="#000" opacity=".05"/>`;
 
   // ---- アクセサリ ----
   let acc = "";
@@ -108,7 +119,10 @@ Art.face = function (style, mood = "normal", opts = {}) {
       <rect x="86" y="158" width="28" height="20" rx="8" fill="${s.skin}"/>
       <path d="M48 96 C48 58 152 58 152 96 C152 152 122 178 100 178 C78 178 48 152 48 96 Z" fill="${s.skin}"/>
       <ellipse cx="49" cy="116" rx="7" ry="10" fill="${s.skin}"/><ellipse cx="151" cy="116" rx="7" ry="10" fill="${s.skin}"/>
+      ${faceShade}
+      ${fringeShadow}
       ${H.front}
+      ${hairGloss}
       ${brows}
       ${eye(76)}${eye(124)}
       <path d="M99 124 q3 5 -1 8" stroke="#e0a894" stroke-width="2" fill="none" stroke-linecap="round"/>
