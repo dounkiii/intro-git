@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CCNA Quest — ゲームで学ぶCCNA</title>
+<style>
+  :root{
+    --bg:#0b1120; --bg2:#0f172a; --card:#1e293b; --card2:#273449;
+    --line:#334155; --txt:#e2e8f0; --muted:#94a3b8;
+    --brand:#38bdf8; --brand2:#818cf8;
+    --good:#34d399; --bad:#f87171; --warn:#fbbf24;
+    --shadow:0 10px 30px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Hiragino Sans","Noto Sans JP",Meiryo,sans-serif;
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(56,189,248,.12), transparent),
+      radial-gradient(1000px 500px at -10% 20%, rgba(129,140,248,.12), transparent),
+      var(--bg);
+    color:var(--txt); min-height:100vh; line-height:1.6;
+  }
+  .wrap{max-width:920px;margin:0 auto;padding:16px 16px 60px}
+  a{color:var(--brand)}
+
+  /* ---- ヘッダ / HUD ---- */
+  header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 0 10px}
+  .logo{font-size:1.5rem;font-weight:800;letter-spacing:.5px;display:flex;align-items:center;gap:8px}
+  .logo .dot{width:12px;height:12px;border-radius:50%;background:var(--brand);box-shadow:0 0 14px var(--brand)}
+  .hud{margin-left:auto;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .chip{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:.85rem;font-weight:700;display:flex;gap:6px;align-items:center;white-space:nowrap}
+  .chip b{color:var(--brand)}
+  .lvlbar{width:160px;height:10px;background:var(--card2);border-radius:999px;overflow:hidden;border:1px solid var(--line)}
+  .lvlbar>span{display:block;height:100%;background:linear-gradient(90deg,var(--brand),var(--brand2));width:0;transition:width .5s cubic-bezier(.2,.8,.2,1)}
+
+  /* ---- カード ---- */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;margin-top:10px}
+  .card{background:linear-gradient(160deg,var(--card),var(--bg2));border:1px solid var(--line);border-radius:18px;padding:18px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+  .mode{cursor:pointer;transition:transform .15s ease, border-color .15s ease}
+  .mode:hover{transform:translateY(-4px);border-color:var(--brand)}
+  .mode .emoji{font-size:2rem}
+  .mode h3{margin:8px 0 4px;font-size:1.1rem}
+  .mode p{margin:0;color:var(--muted);font-size:.9rem}
+
+  h2.section{font-size:1.05rem;color:var(--muted);text-transform:uppercase;letter-spacing:2px;margin:26px 0 4px;font-weight:700}
+
+  /* ---- ボタン ---- */
+  .btn{appearance:none;border:1px solid var(--line);background:var(--card2);color:var(--txt);
+    padding:12px 18px;border-radius:12px;font-size:1rem;font-weight:700;cursor:pointer;transition:.12s}
+  .btn:hover{border-color:var(--brand)}
+  .btn.primary{background:linear-gradient(90deg,var(--brand),var(--brand2));border:none;color:#04121f}
+  .btn.ghost{background:transparent}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .btn-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+
+  /* ---- クイズ ---- */
+  .qmeta{display:flex;justify-content:space-between;align-items:center;color:var(--muted);font-size:.9rem;margin-bottom:8px;flex-wrap:wrap;gap:8px}
+  .qbar{height:8px;background:var(--card2);border-radius:999px;overflow:hidden;border:1px solid var(--line);margin-bottom:16px}
+  .qbar>span{display:block;height:100%;background:var(--brand);width:0;transition:width .3s}
+  .qtext{font-size:1.2rem;font-weight:700;margin:6px 0 16px}
+  .choices{display:grid;gap:10px}
+  .choice{text-align:left;padding:14px 16px;border-radius:12px;border:1px solid var(--line);background:var(--card2);
+    color:var(--txt);cursor:pointer;font-size:1rem;transition:.12s;display:flex;gap:10px;align-items:flex-start}
+  .choice:hover:not(:disabled){border-color:var(--brand);transform:translateX(3px)}
+  .choice .key{font-weight:800;color:var(--muted);min-width:1.3em}
+  .choice.correct{border-color:var(--good);background:rgba(52,211,153,.15)}
+  .choice.wrong{border-color:var(--bad);background:rgba(248,113,113,.15)}
+  .choice:disabled{cursor:default}
+  .exp{margin-top:16px;padding:14px 16px;border-radius:12px;border:1px solid var(--line);background:var(--bg2);display:none}
+  .exp.show{display:block}
+  .exp .tag{font-weight:800;margin-right:6px}
+  .exp.ok .tag{color:var(--good)} .exp.ng .tag{color:var(--bad)}
+  .combo{position:fixed;top:20%;left:50%;transform:translateX(-50%);font-size:2.4rem;font-weight:900;
+    color:var(--warn);text-shadow:0 4px 20px rgba(251,191,36,.5);opacity:0;pointer-events:none;transition:.3s;z-index:50}
+  .combo.pop{opacity:1;transform:translateX(-50%) scale(1.2)}
+
+  /* ---- サブネット / 汎用入力 ---- */
+  .bigq{font-size:1.6rem;font-weight:800;text-align:center;margin:10px 0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--brand)}
+  .field{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin:14px 0}
+  input[type=text]{background:var(--bg2);border:1px solid var(--line);color:var(--txt);padding:12px 14px;border-radius:10px;font-size:1rem;font-family:ui-monospace,monospace;min-width:180px;text-align:center}
+  input[type=text]:focus{outline:none;border-color:var(--brand)}
+  .subgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;max-width:520px;margin:0 auto}
+  .subgrid label{font-size:.85rem;color:var(--muted);display:block;margin-bottom:4px}
+
+  /* ---- フラッシュカード ---- */
+  .flip{perspective:1200px;height:280px;margin:10px 0;cursor:pointer}
+  .flip-inner{position:relative;width:100%;height:100%;transition:transform .5s;transform-style:preserve-3d}
+  .flip.flipped .flip-inner{transform:rotateY(180deg)}
+  .flip-face{position:absolute;inset:0;backface-visibility:hidden;border-radius:18px;border:1px solid var(--line);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;background:linear-gradient(160deg,var(--card),var(--bg2))}
+  .flip-back{transform:rotateY(180deg);background:linear-gradient(160deg,var(--card2),var(--bg2))}
+  .flip-face .lbl{position:absolute;top:12px;left:16px;font-size:.75rem;color:var(--muted);letter-spacing:1px}
+  .flip-front .txt{font-size:1.7rem;font-weight:800}
+  .flip-back .txt{font-size:1.05rem}
+
+  /* ---- ポートゲーム ---- */
+  .match{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:12px}
+  .match .col{display:grid;gap:8px}
+  .tile{padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--card2);cursor:pointer;text-align:center;font-weight:700;transition:.12s;font-size:.95rem}
+  .tile:hover{border-color:var(--brand)}
+  .tile.sel{border-color:var(--brand);background:rgba(56,189,248,.2)}
+  .tile.done{opacity:.35;pointer-events:none;border-color:var(--good)}
+  .tile.miss{animation:shake .3s}
+  @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+  .port .layer{font-size:.72rem;color:var(--muted);display:block}
+
+  /* ---- 実績 ---- */
+  .ach{display:flex;gap:12px;align-items:center;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--card2)}
+  .ach.locked{opacity:.4;filter:grayscale(1)}
+  .ach .ico{font-size:1.8rem}
+  .ach b{display:block}
+  .ach small{color:var(--muted)}
+
+  /* ---- 結果画面 ---- */
+  .result{text-align:center;padding:20px 0}
+  .result .score{font-size:3rem;font-weight:900;color:var(--brand)}
+  .result .xp{color:var(--warn);font-weight:800;font-size:1.2rem}
+
+  /* ---- 汎用 ---- */
+  .hidden{display:none!important}
+  .center{text-align:center}
+  .muted{color:var(--muted)}
+  .backlink{cursor:pointer;color:var(--muted);font-weight:700;display:inline-flex;gap:6px;align-items:center;margin-bottom:6px}
+  .backlink:hover{color:var(--brand)}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--card);border:1px solid var(--brand);
+    padding:12px 18px;border-radius:12px;box-shadow:var(--shadow);opacity:0;transition:.3s;z-index:60;font-weight:700;display:flex;gap:8px;align-items:center}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .stat-row{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px}
+  .stat{flex:1;min-width:120px;background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:12px;text-align:center}
+  .stat b{display:block;font-size:1.6rem;color:var(--brand)}
+  .stat small{color:var(--muted)}
+  select{background:var(--bg2);border:1px solid var(--line);color:var(--txt);padding:10px 12px;border-radius:10px;font-size:1rem}
+  footer{text-align:center;color:var(--muted);font-size:.8rem;margin-top:40px}
+</style>
+</head>
+<body>
+<div class="combo" id="combo"></div>
+<div class="toast" id="toast"></div>
+
+<div class="wrap">
+  <header>
+    <div class="logo"><span class="dot"></span>CCNA&nbsp;Quest</div>
+    <div class="hud">
+      <div class="chip" title="連続学習日数">🔥 <b id="hud-streak">0</b>日</div>
+      <div class="chip">Lv.<b id="hud-level">1</b></div>
+      <div class="lvlbar" title="次のレベルまで"><span id="hud-xpbar"></span></div>
+      <div class="chip">⭐ <b id="hud-xp">0</b> XP</div>
+    </div>
+  </header>
+
+  <!-- ホーム -->
+  <section id="view-home">
+    <h2 class="section">学習モードを選ぶ</h2>
+    <div class="grid" id="mode-grid"></div>
+
+    <h2 class="section">あなたの記録</h2>
+    <div class="stat-row" id="stat-row"></div>
+
+    <h2 class="section">実績バッジ</h2>
+    <div class="grid" id="ach-grid"></div>
+  </section>
+
+  <!-- クイズ設定 -->
+  <section id="view-quiz-setup" class="hidden">
+    <div class="backlink" onclick="go('home')">← ホームに戻る</div>
+    <div class="card">
+      <h3>クイズを始める</h3>
+      <p class="muted">出題領域を選んでください。ランダムは全領域からミックスして出題します。</p>
+      <div style="margin:14px 0">
+        <select id="quiz-domain"></select>
+        &nbsp;
+        <select id="quiz-count">
+          <option value="5">5問</option>
+          <option value="10" selected>10問</option>
+          <option value="20">20問</option>
+        </select>
+      </div>
+      <button class="btn primary" onclick="Quiz.start()">スタート</button>
+    </div>
+  </section>
+
+  <!-- クイズ本編 -->
+  <section id="view-quiz" class="hidden">
+    <div class="backlink" onclick="Quiz.quit()">← 中断してホームへ</div>
+    <div class="card">
+      <div class="qmeta">
+        <span id="q-progress"></span>
+        <span>🔥 コンボ <b id="q-combo">0</b> / スコア <b id="q-score">0</b></span>
+      </div>
+      <div class="qbar"><span id="q-bar"></span></div>
+      <div class="qtext" id="q-text"></div>
+      <div class="choices" id="q-choices"></div>
+      <div class="exp" id="q-exp"></div>
+      <div class="btn-row hidden" id="q-next-row">
+        <button class="btn primary" id="q-next" onclick="Quiz.next()">次へ →</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- サブネット道場 -->
+  <section id="view-subnet" class="hidden">
+    <div class="backlink" onclick="go('home')">← ホームに戻る</div>
+    <div class="card">
+      <div class="qmeta">
+        <span>🧮 サブネット道場</span>
+        <span>連続正解 <b id="sub-streak">0</b> / 正解数 <b id="sub-total">0</b></span>
+      </div>
+      <p class="muted center" id="sub-prompt"></p>
+      <div class="bigq" id="sub-q"></div>
+      <div class="subgrid" id="sub-fields"></div>
+      <div class="btn-row" style="justify-content:center">
+        <button class="btn primary" id="sub-check" onclick="Subnet.check()">答え合わせ</button>
+        <button class="btn ghost" onclick="Subnet.newQ()">新しい問題 →</button>
+      </div>
+      <div class="exp" id="sub-exp"></div>
+    </div>
+  </section>
+
+  <!-- フラッシュカード -->
+  <section id="view-flash" class="hidden">
+    <div class="backlink" onclick="go('home')">← ホームに戻る</div>
+    <div class="card">
+      <div class="qmeta"><span>🃏 フラッシュカード</span><span id="flash-progress"></span></div>
+      <div class="flip" id="flip" onclick="Flash.flip()">
+        <div class="flip-inner">
+          <div class="flip-face flip-front"><span class="lbl" id="flash-domain"></span><div class="txt" id="flash-front"></div><small class="muted">タップで答えを表示</small></div>
+          <div class="flip-face flip-back"><span class="lbl">意味</span><div class="txt" id="flash-back"></div></div>
+        </div>
+      </div>
+      <div class="btn-row" style="justify-content:space-between">
+        <button class="btn ghost" onclick="Flash.prev()">← 前</button>
+        <button class="btn primary" onclick="Flash.next()">次 →</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ポートゲーム -->
+  <section id="view-ports" class="hidden">
+    <div class="backlink" onclick="go('home')">← ホームに戻る</div>
+    <div class="card">
+      <div class="qmeta"><span>🚪 ポート&プロトコル マッチ</span><span>残り <b id="ports-left">0</b></span></div>
+      <p class="muted center">左のプロトコルと右のポート番号を交互にタップして繋げよう！</p>
+      <div class="match">
+        <div class="col" id="ports-left-col"></div>
+        <div class="col" id="ports-right-col"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 結果 -->
+  <section id="view-result" class="hidden">
+    <div class="card result">
+      <div style="font-size:3rem" id="res-emoji">🎉</div>
+      <div class="score" id="res-score"></div>
+      <div class="xp" id="res-xp"></div>
+      <p class="muted" id="res-msg"></p>
+      <div class="btn-row" style="justify-content:center">
+        <button class="btn primary" id="res-again">もう一度</button>
+        <button class="btn ghost" onclick="go('home')">ホームへ</button>
+      </div>
+    </div>
+  </section>
+
+  <footer>CCNA Quest — CCNA 200-301 の学習用ゲーム。進捗はこのブラウザに自動保存されます。</footer>
+</div>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
