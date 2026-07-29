@@ -15,7 +15,7 @@ const HEROINES = [
     id: "akari", name: "あかり", age: 25, domain: "connectivity",
     job: "ネットワークエンジニア", tagline: "最適なルート、一緒に見つけよ？",
     bio: "ルーティングが得意。OSPFの美しさに惚れてます。休日はカフェで資格の勉強。理屈っぽいってよく言われる😌",
-    face: { skin: "#ffe0d0", hair: "#3a3f5c", hair2: "#2a2e44", eyes: "#4a6fa5", hairstyle: "long", accessory: null, outfit: "#5b6ee0" },
+    face: { skin: "#ffe4d6", hair: "#cfd6e6", hair2: "#9aa3bd", eyes: "#3b7fd4", hairstyle: "hime", eyetype: "sharp", ahoge: true, outfit: "#5b6ee0" },
     theme: "#5b6ee0",
     route: [
       { her: "マッチありがとう！あかりです😊 プロフィール見たけど、CCNA勉強してるんだ？", m: "happy" },
@@ -51,8 +51,8 @@ const HEROINES = [
     id: "mio", name: "みお", age: 23, domain: "access",
     job: "インフラエンジニア", tagline: "みんなを繋ぐのが好き！",
     bio: "スイッチとWi-Fiが担当♪ VLANでみんなを整理整頓するのが快感。明るいって言われる！たくさん話そ〜📶",
-    face: { skin: "#ffe3d0", hair: "#e88a4d", hair2: "#c96f38", eyes: "#7a9a3a", hairstyle: "twin", accessory: "clip", outfit: "#ff9f43" },
-    theme: "#ff9f43",
+    face: { skin: "#ffe7d6", hair: "#ff9ec4", hair2: "#e06aa0", eyes: "#00b4d8", hairstyle: "twin", eyetype: "round", accessory: "clip", outfit: "#ff7aa8" },
+    theme: "#ff7aa8",
     route: [
       { her: "やっほー！みおだよ😆 いいねくれてありがと！ノリで返しちゃった！", m: "happy" },
       { choice: [
@@ -83,7 +83,7 @@ const HEROINES = [
     id: "sena", name: "セナ", age: 27, domain: "security",
     job: "セキュリティエンジニア", tagline: "簡単には心、開かないから。",
     bio: "セキュリティ担当。ACLで不要な通信は全部denyします。人見知り。信頼できる人としか話しません。……一応、募集はしてる。",
-    face: { skin: "#ffdcc8", hair: "#2a2a30", hair2: "#18181c", eyes: "#a23b4a", hairstyle: "pony", accessory: null, outfit: "#c0392b" },
+    face: { skin: "#ffe0cf", hair: "#2c2c36", hair2: "#161620", eyes: "#e0344f", hairstyle: "sidepony", eyetype: "sharp", outfit: "#c0392b" },
     theme: "#c0392b",
     route: [
       { her: "……マッチしたから一応返す。セナ。言っておくけど、私、そう簡単には気を許さないから。", m: "annoyed" },
@@ -115,7 +115,7 @@ const HEROINES = [
     id: "hikari", name: "ひかり", age: 24, domain: "fundamentals",
     job: "社内SE", tagline: "基礎から、ていねいに。",
     bio: "ネットワークの基礎を大事にしてます。OSI参照モデル、暗記より理解派。優しいって言われるのが密かな自慢です☺",
-    face: { skin: "#ffe6d6", hair: "#a06a3a", hair2: "#7f5127", eyes: "#8a6a3a", hairstyle: "bob", accessory: null, outfit: "#38bdf8" },
+    face: { skin: "#ffe8d8", hair: "#8fe0b0", hair2: "#5cb886", eyes: "#d46aa8", hairstyle: "wavy", eyetype: "gentle", accessory: "flower", outfit: "#38bdf8" },
     theme: "#38bdf8",
     route: [
       { her: "はじめまして、ひかりです☺ マッチできて嬉しいです。ゆっくりお話しできたらいいな。", m: "happy" },
@@ -145,7 +145,7 @@ const HEROINES = [
     id: "luna", name: "ルナ", age: 26, domain: "automation",
     job: "DevOps / NetOps", tagline: "手作業? 自動化しましょ。",
     bio: "ネットワーク自動化が専門。Ansibleとにらめっこの毎日。人間関係も宣言的に管理したい派。理想の状態に収束させましょ🤖",
-    face: { skin: "#ffe0e8", hair: "#c9a0e8", hair2: "#a97fd0", eyes: "#7a5fd0", hairstyle: "wavy", accessory: "glasses", outfit: "#a855f7" },
+    face: { skin: "#ffe4ec", hair: "#c9a8f0", hair2: "#a074d8", eyes: "#b34de0", hairstyle: "long", eyetype: "round", accessory: "glasses", ahoge: true, outfit: "#a855f7" },
     theme: "#a855f7",
     route: [
       { her: "こんばんは、ルナです🤖 マッチ確率、悪くなかったので返信を自動化…冗談です。あなたに興味があって。", m: "normal" },

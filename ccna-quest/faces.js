@@ -1,170 +1,191 @@
 /* =====================================================================
- * CCNA Quest - キャラクター立ち絵ジェネレータ (アニメ風SVG)
- * Art.face(style, mood) : プロフィール写真・チャット・デートで使用
- *   style = { skin, hair, hair2, eyes, hairstyle, accessory, outfit }
+ * CCNA Quest - キャラクター立ち絵ジェネレータ (萌え系アニメ SVG) v2
+ * 大きく鋭い瞳・濃いまつ毛・大きなハイライト・流れる毛束で萌え寄りに。
+ * Art.face(style, mood, opts)
+ *   style = { skin, hair, hair2, eyes, hairstyle, eyetype, accessory, ahoge, outfit }
+ *     eyetype: sharp(つり目) | round(まる目) | gentle(たれ目)
  *   mood  = normal | happy | shy | sad | annoyed | love | surprised
- * すべてインラインSVGで描画（外部画像なし / CSP安全）。
  * ===================================================================== */
+
+Art._fid = Art._fid || 0;
 
 Art.face = function (style, mood = "normal", opts = {}) {
   const s = Object.assign({
-    skin: "#ffe0d0", hair: "#5b4636", hair2: "#3f3025", eyes: "#6b4a2b",
-    hairstyle: "long", accessory: null, outfit: "#64748b",
+    skin: "#ffe4d6", hair: "#5b4636", hair2: "#3f3025", eyes: "#6b4a2b",
+    hairstyle: "long", eyetype: "round", accessory: null, ahoge: false, outfit: "#64748b",
   }, style || {});
-  const bg = opts.bg || null; // 円背景色(プロフ写真用)
+  const bg = opts.bg || null;
+  const uid = ++Art._fid;
+  const dark = shade(s.hair, 55), hi = light(s.hair, 70), lash = "#241a1e";
+  const irisTop = light(s.eyes, 55), irisBot = shade(s.eyes, 55);
 
-  // ---- 表情パーツ ----
-  const brows = {
-    normal:    `<path d="M64 92 q10 -5 20 -1" stroke="#7a5c48" stroke-width="3" fill="none" stroke-linecap="round"/>
-                <path d="M116 91 q10 -4 20 1" stroke="#7a5c48" stroke-width="3" fill="none" stroke-linecap="round"/>`,
-    happy:     `<path d="M64 88 q10 -6 20 -2" stroke="#7a5c48" stroke-width="3" fill="none" stroke-linecap="round"/>
-                <path d="M116 86 q10 -4 20 2" stroke="#7a5c48" stroke-width="3" fill="none" stroke-linecap="round"/>`,
-    shy:       `<path d="M64 90 q10 -4 20 -1" stroke="#7a5c48" stroke-width="3" fill="none" stroke-linecap="round"/>
-                <path d="M116 89 q10 -3 20 1" stroke="#7a5c48" stroke-width="3" fill="none" stroke-linecap="round"/>`,
-    sad:       `<path d="M64 88 q12 4 20 8" stroke="#7a5c48" stroke-width="3" fill="none" stroke-linecap="round"/>
-                <path d="M116 96 q8 -4 20 -8" stroke="#7a5c48" stroke-width="3" fill="none" stroke-linecap="round"/>`,
-    annoyed:   `<path d="M64 86 q12 6 20 9" stroke="#7a5c48" stroke-width="3.5" fill="none" stroke-linecap="round"/>
-                <path d="M116 95 q8 -3 20 -9" stroke="#7a5c48" stroke-width="3.5" fill="none" stroke-linecap="round"/>`,
-    love:      `<path d="M64 87 q10 -6 20 -2" stroke="#7a5c48" stroke-width="3" fill="none" stroke-linecap="round"/>
-                <path d="M116 85 q10 -4 20 2" stroke="#7a5c48" stroke-width="3" fill="none" stroke-linecap="round"/>`,
-    surprised: `<path d="M64 84 q10 -3 20 0" stroke="#7a5c48" stroke-width="3" fill="none" stroke-linecap="round"/>
-                <path d="M116 84 q10 -2 20 1" stroke="#7a5c48" stroke-width="3" fill="none" stroke-linecap="round"/>`,
-  }[mood] || "";
-
-  const eye = (cx) => {
-    const ir = s.eyes;
-    if (mood === "happy") // ^_^ 閉じ目
-      return `<path d="M${cx - 12} 112 q12 -12 24 0" stroke="#3a2a20" stroke-width="3.5" fill="none" stroke-linecap="round"/>`;
-    if (mood === "love") // ハート目
-      return `<g><circle cx="${cx}" cy="110" r="13" fill="#fff"/>
-        <path d="M${cx} 116 l-8 -8 a4.5 4.5 0 0 1 8 -1 a4.5 4.5 0 0 1 8 1 z" fill="#ff5c8a"/>
-        <circle cx="${cx - 3}" cy="106" r="2" fill="#fff"/></g>`;
-    if (mood === "shy") // 半目
-      return `<g><path d="M${cx - 13} 108 q13 -8 26 0 q-3 10 -13 10 q-10 0 -13 -10z" fill="#fff" stroke="#3a2a20" stroke-width="1.5"/>
-        <circle cx="${cx}" cy="112" r="8" fill="${ir}"/><circle cx="${cx}" cy="112" r="4" fill="#241a13"/>
-        <circle cx="${cx - 3}" cy="109" r="2.4" fill="#fff"/>
-        <path d="M${cx - 13} 108 q13 -8 26 0" stroke="#3a2a20" stroke-width="2.5" fill="none"/></g>`;
-    const wide = mood === "surprised";
-    const ry = wide ? 18 : 15;
-    const cy = wide ? 108 : 111;
-    const irr = wide ? 9.5 : 10.5;   // 大きめの瞳(ギャル/かわいい系)
-    const gid = "ir" + (Art._fid = (Art._fid || 0) + 1);
+  /* ---------- 瞳 ---------- */
+  const eye = (cx, dir) => {
+    // dir: +1=右目(外側=右) / -1=左目
+    if (mood === "happy") // 嬉しい閉じ目( ^ )
+      return `<path d="M${cx - 16} 150 Q${cx} 132 ${cx + 16} 150" stroke="${lash}" stroke-width="4.5" fill="none" stroke-linecap="round"/>
+              <path d="M${cx - 12} 158 q12 6 24 0" stroke="${lash}" stroke-width="2" fill="none" stroke-linecap="round" opacity=".5"/>`;
+    const w = 18, h = mood === "surprised" ? 26 : 22;
+    const lidTopY = mood === "shy" || mood === "sad" ? 138 : 128; // 半目/伏し目
+    const flick = s.eyetype === "sharp" ? -8 : s.eyetype === "gentle" ? 8 : 0; // 外側の跳ね
+    // 目の輪郭(アーモンド)
+    const almond = `M${cx - dir * w} ${146}
+      C${cx - dir * w} ${132} ${cx - dir * w * 0.3} ${lidTopY} ${cx + dir * 2} ${lidTopY}
+      C${cx + dir * w * 0.6} ${lidTopY} ${cx + dir * w} ${132 + flick} ${cx + dir * w} ${146 + flick}
+      C${cx + dir * w} ${158} ${cx + dir * w * 0.4} ${146 + h * 0.5} ${cx} ${146 + h * 0.5}
+      C${cx - dir * w * 0.6} ${146 + h * 0.5} ${cx - dir * w} ${156} ${cx - dir * w} ${146} Z`;
+    const clip = `eclip${uid}${dir > 0 ? "r" : "l"}`;
+    const irisY = mood === "sad" ? 150 : 147;
+    const heart = mood === "love"
+      ? `<path d="M${cx} ${irisY + 6} l-9 -9 a5 5 0 0 1 9 -1 a5 5 0 0 1 9 1 z" fill="#ff4d79"/><circle cx="${cx - 3}" cy="${irisY - 3}" r="2.6" fill="#fff"/>`
+      : `<circle cx="${cx}" cy="${irisY}" r="14" fill="url(#ir${uid})"/>
+         <ellipse cx="${cx}" cy="${irisY + 6}" rx="12" ry="7" fill="${irisBot}" opacity=".5"/>
+         <circle cx="${cx}" cy="${irisY + 1}" r="6.5" fill="#1c1016"/>
+         <circle cx="${cx - 4}" cy="${irisY - 6}" r="5" fill="#fff"/>
+         <circle cx="${cx + 5}" cy="${irisY + 5}" r="3" fill="#fff" opacity=".9"/>
+         <ellipse cx="${cx}" cy="${irisY - 10}" rx="9" ry="3.5" fill="#fff" opacity=".35"/>`;
     return `<g>
-      <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stop-color="${ir}"/><stop offset="1" stop-color="${shade(ir)}"/></linearGradient></defs>
-      <ellipse cx="${cx}" cy="110" rx="13" ry="${ry}" fill="#fff"/>
-      <circle cx="${cx}" cy="${cy}" r="${irr}" fill="url(#${gid})"/>
-      <circle cx="${cx}" cy="${cy + 1}" r="${wide ? 4.5 : 5.5}" fill="#20140d"/>
-      <ellipse cx="${cx}" cy="${cy + 7}" rx="8" ry="4" fill="#fff" opacity=".25"/>
-      <circle cx="${cx - 3.5}" cy="${cy - 4}" r="3.4" fill="#fff"/>
-      <circle cx="${cx + 3.5}" cy="${cy + 4}" r="2" fill="#fff" opacity=".9"/>
-      <path d="M${cx - 14} 99 q14 -7 28 0" stroke="#2a1c14" stroke-width="4" fill="none" stroke-linecap="round"/>
-      <path d="M${cx + 10} 98 l6 -4" stroke="#2a1c14" stroke-width="3" fill="none" stroke-linecap="round"/>
-      <path d="M${cx - 14} 121 q6 4 11 4" stroke="#2a1c14" stroke-width="1.6" fill="none" stroke-linecap="round" opacity=".6"/></g>`;
-  };
-  const shade = (hex) => { // 瞳の下側を少し暗く
-    const n = parseInt(hex.slice(1), 16);
-    const r = Math.max(0, (n >> 16 & 255) - 40), g = Math.max(0, (n >> 8 & 255) - 40), b = Math.max(0, (n & 255) - 30);
-    return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
-  };
-  const light = (hex) => { // 髪のツヤ用に明るく
-    const n = parseInt(hex.slice(1), 16);
-    const r = Math.min(255, (n >> 16 & 255) + 70), g = Math.min(255, (n >> 8 & 255) + 70), b = Math.min(255, (n & 255) + 70);
-    return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+      <defs><clipPath id="${clip}"><path d="${almond}"/></clipPath></defs>
+      <path d="${almond}" fill="#fdfdff"/>
+      <g clip-path="url(#${clip})">${heart}</g>
+      <path d="M${cx - dir * w} ${146} C${cx - dir * w} ${131} ${cx - dir * w * 0.3} ${lidTopY - 1} ${cx + dir * 2} ${lidTopY - 1}
+        C${cx + dir * w * 0.6} ${lidTopY - 1} ${cx + dir * w} ${131 + flick} ${cx + dir * w} ${146 + flick}"
+        stroke="${lash}" stroke-width="5" fill="none" stroke-linecap="round"/>
+      <path d="M${cx + dir * w} ${146 + flick} l${dir * 6} ${flick < 0 ? -6 : 2}" stroke="${lash}" stroke-width="4" stroke-linecap="round"/>
+      ${s.eyetype === "gentle" ? `<path d="M${cx - dir * w * 0.6} ${146 + h * 0.5} q${dir * 8} 3 ${dir * 14} 0" stroke="${lash}" stroke-width="1.6" fill="none" opacity=".5"/>` : ""}
+    </g>`;
   };
 
+  /* ---------- 眉 ---------- */
+  const browY = 113;
+  const brow = (cx, dir) => {
+    const shapes = {
+      normal: `M${cx - 12} ${browY} q12 -4 24 0`,
+      happy: `M${cx - 12} ${browY - 2} q12 -5 24 -1`,
+      shy: `M${cx - 12} ${browY} q12 -3 24 1`,
+      sad: `M${cx - 12} ${browY + 4} q12 6 24 8`.replace("q12 6 24 8", dir > 0 ? "q12 7 24 9" : "q12 5 24 3"),
+      annoyed: `M${cx - 12} ${browY - 2} q12 6 24 ${dir > 0 ? 9 : 3}`,
+      love: `M${cx - 12} ${browY - 2} q12 -5 24 -1`,
+      surprised: `M${cx - 12} ${browY - 6} q12 -3 24 0`,
+    };
+    return `<path d="${shapes[mood] || shapes.normal}" stroke="${dark}" stroke-width="3" fill="none" stroke-linecap="round" opacity=".92"/>`;
+  };
+
+  /* ---------- 口 ---------- */
   const mouth = {
-    normal:    `<path d="M92 148 q8 6 16 0" stroke="#b5566a" stroke-width="2.5" fill="none" stroke-linecap="round"/>`,
-    happy:     `<path d="M88 145 q12 16 24 0 z" fill="#c1465f" stroke="#a83a52" stroke-width="1.5"/><path d="M90 147 q10 5 20 0" fill="#ff9ba8"/>`,
-    shy:       `<path d="M94 149 q6 4 12 0" stroke="#b5566a" stroke-width="2.5" fill="none" stroke-linecap="round"/>`,
-    sad:       `<path d="M92 152 q8 -6 16 0" stroke="#b5566a" stroke-width="2.5" fill="none" stroke-linecap="round"/>`,
-    annoyed:   `<path d="M92 150 h16" stroke="#b5566a" stroke-width="2.5" fill="none" stroke-linecap="round"/>`,
-    love:      `<path d="M92 147 q8 8 16 0" stroke="#c1465f" stroke-width="2.5" fill="none" stroke-linecap="round"/>`,
-    surprised: `<ellipse cx="100" cy="150" rx="6" ry="8" fill="#a83a52"/>`,
+    normal: `<path d="M100 182 q10 7 20 0" stroke="#c65a70" stroke-width="2.6" fill="none" stroke-linecap="round"/>`,
+    happy: `<path d="M98 180 q12 16 24 0 q-4 6 -12 6 q-8 0 -12 -6z" fill="#b83a55"/><path d="M101 181 q9 4 18 0" fill="#ff8fa0"/>`,
+    shy: `<path d="M104 183 q6 5 12 0" stroke="#c65a70" stroke-width="2.6" fill="none" stroke-linecap="round"/>`,
+    sad: `<path d="M102 187 q8 -6 16 0" stroke="#c65a70" stroke-width="2.6" fill="none" stroke-linecap="round"/>`,
+    annoyed: `<path d="M104 186 q6 -3 12 -1" stroke="#c65a70" stroke-width="2.6" fill="none" stroke-linecap="round"/>`,
+    love: `<path d="M100 181 q10 9 20 0" stroke="#b83a55" stroke-width="2.6" fill="none" stroke-linecap="round"/><path d="M103 183 q7 4 14 0" fill="#ff8fa0"/>`,
+    surprised: `<ellipse cx="110" cy="186" rx="6" ry="8" fill="#9e3048"/>`,
   }[mood] || "";
 
-  const blush = (["shy", "love", "happy"].includes(mood))
-    ? `<ellipse cx="70" cy="132" rx="11" ry="6" fill="#ff9a9a" opacity="${mood === "love" ? .75 : .55}"/>
-       <ellipse cx="130" cy="132" rx="11" ry="6" fill="#ff9a9a" opacity="${mood === "love" ? .75 : .55}"/>`
+  const blushOn = ["shy", "love", "happy"].includes(mood);
+  const blush = blushOn
+    ? `<g opacity="${mood === "love" ? .8 : .6}"><ellipse cx="76" cy="172" rx="13" ry="7" fill="#ff8a9a"/><ellipse cx="144" cy="172" rx="13" ry="7" fill="#ff8a9a"/>
+       <path d="M70 170 h12 M72 175 h9" stroke="#ff6a80" stroke-width="1.4" opacity=".7"/><path d="M138 170 h12 M141 175 h9" stroke="#ff6a80" stroke-width="1.4" opacity=".7"/></g>`
     : "";
 
-  // ---- 髪型 (背面 + 前髪) ----
-  const H = hairShapes(s.hairstyle, s.hair, s.hair2);
-  const hi = light(s.hair);   // 髪のツヤ用ハイライト色
-  // 髪ツヤ(前髪の上に光沢) + 前髪の落ち影(額) — 塗りっぽさを出す
-  const hairGloss = `<path d="M60 60 Q100 48 140 62 Q126 56 100 56 Q74 56 60 60 Z" fill="${hi}" opacity=".55"/>
-    <ellipse cx="118" cy="64" rx="14" ry="5" fill="${hi}" opacity=".45" transform="rotate(-12 118 64)"/>`;
-  const fringeShadow = `<path d="M52 92 Q100 108 148 92 Q140 110 100 112 Q60 110 52 92 Z" fill="#000" opacity=".07"/>`;
-  const faceShade = `<path d="M136 96 C150 108 150 150 118 176 C140 150 138 118 130 100 Z" fill="#000" opacity=".05"/>`;
+  const H = hairShapes(s.hairstyle, s.hair, dark, hi, uid);
+  const ahoge = s.ahoge ? `<path d="M110 46 q-4 -18 8 -24 q-2 10 4 18" fill="none" stroke="${s.hair}" stroke-width="4" stroke-linecap="round"/>` : "";
 
-  // ---- アクセサリ ----
   let acc = "";
   if (s.accessory === "glasses")
-    acc = `<g fill="none" stroke="#334155" stroke-width="2.5"><rect x="60" y="98" width="30" height="24" rx="8"/><rect x="110" y="98" width="30" height="24" rx="8"/><path d="M90 108 h20"/></g>`;
+    acc = `<g fill="none" stroke="#2a2f3a" stroke-width="2.6"><rect x="66" y="134" width="34" height="28" rx="10"/><rect x="120" y="134" width="34" height="28" rx="10"/><path d="M100 146 h20"/></g>`;
+  else if (s.accessory === "flower")
+    acc = `<g transform="translate(66,72)">${flower("#ff5c8a")}</g>`;
+  else if (s.accessory === "flowerG")
+    acc = `<g transform="translate(66,72)">${flower("#8ee6a0")}</g>`;
   else if (s.accessory === "clip")
-    acc = `<g><rect x="60" y="70" width="16" height="7" rx="3" fill="#ff5c8a"/><circle cx="68" cy="73" r="2" fill="#fff"/></g>`;
-  else if (s.accessory === "headset")
-    acc = `<path d="M52 108 q0 -56 96 0" fill="none" stroke="#1e293b" stroke-width="5"/><rect x="44" y="104" width="12" height="18" rx="5" fill="#1e293b"/><rect x="144" y="104" width="12" height="18" rx="5" fill="#38bdf8"/>`;
-  else if (s.accessory === "star")
-    acc = `<path d="M64 72 l3 6 6 1 -4 5 1 6 -6 -3 -6 3 1 -6 -4 -5 6 -1z" fill="#fde047"/>`;
+    acc = `<g><rect x="60" y="86" width="20" height="8" rx="4" fill="#ff5c8a"/><circle cx="70" cy="90" r="2.4" fill="#fff"/></g>`;
+  else if (s.accessory === "cap")
+    acc = `<path d="M56 78 Q110 44 164 78 L164 86 Q110 66 56 86 Z" fill="#2a2f3a"/><path d="M150 80 q20 2 24 12 l-24 0z" fill="#2a2f3a"/><circle cx="110" cy="60" r="6" fill="#c0392b"/>`;
 
-  const surprise = mood === "surprised" ? `<text x="150" y="70" font-size="26">💦</text>` : "";
-  const love = mood === "love" ? `<text x="150" y="72" font-size="22">💕</text>` : "";
+  const sweat = mood === "surprised" ? `<path d="M158 96 q6 10 0 16 q-6 -6 0 -16z" fill="#7fd3ff" opacity=".85"/>` : "";
+  const loveFx = mood === "love" ? `<text x="158" y="86" font-size="22">💕</text>` : "";
 
-  return `<svg viewBox="0 0 200 220" class="face" preserveAspectRatio="xMidYMid meet" aria-label="キャラクター">
-    ${bg ? `<circle cx="100" cy="110" r="108" fill="${bg}"/>` : ""}
+  return `<svg viewBox="0 0 220 260" class="face" preserveAspectRatio="xMidYMid meet" aria-label="キャラクター">
+    <defs><linearGradient id="ir${uid}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${irisTop}"/><stop offset=".55" stop-color="${s.eyes}"/><stop offset="1" stop-color="${irisBot}"/>
+    </linearGradient></defs>
+    ${bg ? `<rect x="0" y="0" width="220" height="260" fill="${bg}"/>` : ""}
     <g class="face-bob">
       ${H.back}
-      <path d="M70 168 q30 -10 60 0 l6 40 h-72 z" fill="${s.outfit}"/>
-      <rect x="86" y="158" width="28" height="20" rx="8" fill="${s.skin}"/>
-      <path d="M48 96 C48 58 152 58 152 96 C152 152 122 178 100 178 C78 178 48 152 48 96 Z" fill="${s.skin}"/>
-      <ellipse cx="49" cy="116" rx="7" ry="10" fill="${s.skin}"/><ellipse cx="151" cy="116" rx="7" ry="10" fill="${s.skin}"/>
-      ${faceShade}
-      ${fringeShadow}
-      ${H.front}
-      ${hairGloss}
-      ${brows}
-      ${eye(76)}${eye(124)}
-      <path d="M99 124 q3 5 -1 8" stroke="#e0a894" stroke-width="2" fill="none" stroke-linecap="round"/>
+      ${ahoge}
+      <path d="M78 210 q32 -12 64 0 l10 46 h-84 z" fill="${s.outfit}"/>
+      <path d="M96 196 h28 v18 q-14 8 -28 0 z" fill="${s.skin}"/>
+      <path d="M60 96 C58 64 92 56 110 56 C128 56 162 64 160 96 C160 152 150 202 110 216 C70 202 60 152 60 96 Z" fill="${s.skin}"/>
+      <ellipse cx="60" cy="150" rx="8" ry="12" fill="${s.skin}"/><ellipse cx="160" cy="150" rx="8" ry="12" fill="${s.skin}"/>
+      <path d="M138 100 C154 116 152 168 118 208 C144 168 142 128 132 104 Z" fill="#c98" opacity=".12"/>
+      ${H.side}
+      ${eye(86, -1)}${eye(134, 1)}
+      ${brow(86, -1)}${brow(134, 1)}
+      <path d="M108 160 q4 6 -1 10" stroke="#e0a894" stroke-width="2" fill="none" stroke-linecap="round"/>
       ${blush}
       ${mouth}
+      ${H.front}
+      ${H.gloss}
       ${acc}
-      ${surprise}${love}
+      ${sweat}${loveFx}
     </g>
   </svg>`;
 };
 
-/* 髪型シェイプ集 */
-function hairShapes(kind, c, c2) {
-  const shade = c2 || c;
+/* 花アクセサリ */
+function flower(c) {
+  let p = "";
+  for (let i = 0; i < 5; i++) { const a = i * 72 * Math.PI / 180; p += `<ellipse cx="${Math.cos(a) * 8}" cy="${Math.sin(a) * 8}" rx="5" ry="7" fill="${c}" transform="rotate(${i * 72})"/>`; }
+  return `<g>${p}<circle r="4" fill="#ffe066"/></g>`;
+}
+
+/* 色ユーティリティ */
+function shade(hex, d = 40) { const n = parseInt(hex.slice(1), 16); const r = Math.max(0, (n >> 16 & 255) - d), g = Math.max(0, (n >> 8 & 255) - d), b = Math.max(0, (n & 255) - d); return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1); }
+function light(hex, d = 60) { const n = parseInt(hex.slice(1), 16); const r = Math.min(255, (n >> 16 & 255) + d), g = Math.min(255, (n >> 8 & 255) + d), b = Math.min(255, (n & 255) + d); return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1); }
+
+/* ---------- 髪型 (背面 / サイド / 前髪 / ツヤ) ---------- */
+function hairShapes(kind, c, dk, hi, uid) {
+  // 前髪: とがった毛束(ジグザグ) 共通ベース
+  const bangs = `<path d="M58 104 C54 58 92 46 110 46 C130 46 166 58 162 106
+      C156 84 150 92 142 74 L134 96 L126 72 L116 98 L110 74 L104 98 L94 72 L86 96 L78 74 C70 92 64 86 58 104 Z" fill="${c}"/>`;
+  const gloss = `<path d="M78 72 Q110 58 142 74 Q120 66 110 66 Q92 66 78 72 Z" fill="${hi}" opacity=".55"/>
+    <path d="M96 70 l-4 20 M118 70 l3 20 M108 68 l0 22" stroke="${hi}" stroke-width="2" opacity=".4" fill="none"/>`;
   const S = {
     long: {
-      back: `<path d="M40 150 C24 90 40 40 100 40 C160 40 176 90 160 150 L160 200 L148 200 C150 130 150 96 150 96 L50 96 C50 96 50 130 52 200 L40 200 Z" fill="${shade}"/>`,
-      front: `<path d="M44 100 C40 52 70 34 100 34 C132 34 162 54 156 102 C150 78 140 70 128 68 C120 84 108 88 100 88 C92 88 82 84 74 70 C60 76 50 86 44 100 Z" fill="${c}"/>
-              <path d="M100 34 C86 34 70 44 66 66 q18 -12 34 -10 z" fill="${shade}" opacity=".5"/>`,
+      back: `<path d="M46 160 C34 92 48 48 110 48 C172 48 186 92 174 160 L174 236 L156 236 C160 150 158 104 158 104 L62 104 C62 104 60 150 64 236 L46 236 Z" fill="${dk}"/>`,
+      side: `<path d="M56 104 C50 150 54 190 60 220 L74 216 C66 180 66 140 70 108 Z" fill="${c}"/>
+             <path d="M164 104 C170 150 166 190 160 222 L146 216 C154 180 154 140 150 108 Z" fill="${c}"/>`,
+      front: bangs, gloss,
     },
     twin: {
-      back: `<path d="M46 92 C42 50 70 40 100 40 C130 40 158 50 154 92 L146 92 C146 70 130 60 100 60 C70 60 54 70 54 92 Z" fill="${shade}"/>
-             <ellipse cx="34" cy="132" rx="18" ry="34" fill="${shade}"/><ellipse cx="166" cy="132" rx="18" ry="34" fill="${shade}"/>
-             <circle cx="40" cy="96" r="9" fill="${c}"/><circle cx="160" cy="96" r="9" fill="${c}"/>`,
-      front: `<path d="M46 100 C42 50 72 34 100 34 C130 34 160 52 154 102 C148 80 138 72 126 70 C118 84 108 88 100 88 C92 88 82 84 74 70 C60 76 52 86 46 100 Z" fill="${c}"/>`,
+      back: `<path d="M52 100 C48 54 78 46 110 46 C142 46 172 54 168 100 L156 100 C156 74 138 62 110 62 C82 62 64 74 64 100 Z" fill="${dk}"/>
+             <path d="M40 130 C28 140 26 190 40 224 C48 196 44 150 56 120 Z" fill="${dk}"/>
+             <path d="M180 130 C192 140 194 190 180 224 C172 196 176 150 164 120 Z" fill="${dk}"/>
+             <path d="M40 128 C30 138 30 180 40 210 C46 186 44 150 54 124 Z" fill="${c}"/>
+             <path d="M180 128 C190 138 190 180 180 210 C174 186 176 150 166 124 Z" fill="${c}"/>`,
+      side: `<path d="M56 104 C52 140 54 168 58 190 L70 186 C64 156 64 130 68 108 Z" fill="${c}"/>
+             <path d="M164 104 C168 140 166 168 162 190 L150 186 C156 156 156 130 152 108 Z" fill="${c}"/>`,
+      front: bangs, gloss,
     },
-    bob: {
-      back: `<path d="M44 140 C36 84 52 42 100 42 C148 42 164 84 156 140 L156 150 C156 120 150 100 150 100 L50 100 C50 100 44 120 44 150 Z" fill="${shade}"/>`,
-      front: `<path d="M44 108 C40 56 70 36 100 36 C130 36 160 56 156 108 C150 84 140 74 128 72 C118 88 108 90 100 90 C92 90 80 86 72 72 C60 78 50 90 44 108 Z" fill="${c}"/>`,
+    sidepony: {
+      back: `<path d="M50 150 C44 86 60 48 110 48 C160 48 176 86 170 150 L164 150 C164 100 150 96 110 96 C70 96 60 100 56 150 Z" fill="${dk}"/>
+             <path d="M158 70 C188 84 196 150 176 214 C168 190 158 150 150 108 Z" fill="${dk}"/>
+             <path d="M160 74 C184 88 190 148 174 204 C168 184 160 150 152 110 Z" fill="${c}"/>`,
+      side: `<path d="M56 104 C50 150 54 186 60 214 L74 210 C66 176 66 138 70 108 Z" fill="${c}"/>`,
+      front: bangs, gloss,
     },
-    pony: {
-      back: `<path d="M150 60 C176 70 184 120 168 168 C160 150 150 120 146 96 Z" fill="${shade}"/>
-             <path d="M46 130 C40 80 56 42 100 42 C150 42 158 78 150 96 L52 96 C50 108 48 120 48 130 Z" fill="${shade}"/>`,
-      front: `<path d="M44 104 C40 54 72 36 100 36 C138 36 164 58 156 100 C150 78 138 70 126 68 C116 84 106 88 96 86 C88 84 80 80 74 70 C60 76 50 88 44 104 Z" fill="${c}"/>`,
-    },
-    short: {
-      back: `<path d="M48 120 C44 78 58 44 100 44 C142 44 156 78 152 120 L152 112 C152 96 150 96 150 96 L50 96 C50 96 48 96 48 112 Z" fill="${shade}"/>`,
-      front: `<path d="M46 104 C42 58 70 38 100 38 C130 38 158 58 154 104 C146 82 132 74 118 74 C112 84 106 86 100 86 C92 86 84 82 78 72 C62 78 52 88 46 104 Z" fill="${c}"/>`,
+    hime: { // 姫カット(ストレート+サイド直線)
+      back: `<path d="M46 170 C36 92 50 48 110 48 C170 48 184 92 174 170 L174 234 L154 234 L158 104 L62 104 L66 234 L46 234 Z" fill="${dk}"/>`,
+      side: `<path d="M56 104 L58 200 L76 200 L72 104 Z" fill="${c}"/><path d="M164 104 L162 200 L144 200 L148 104 Z" fill="${c}"/>`,
+      front: `<path d="M56 106 C52 58 92 46 110 46 C128 46 168 58 164 106 C164 96 150 92 142 92 L138 100 L128 90 L120 100 L110 88 L100 100 L92 90 L82 100 L78 92 C70 92 56 96 56 106 Z" fill="${c}"/>`,
+      gloss,
     },
     wavy: {
-      back: `<path d="M38 150 C22 88 40 40 100 40 C160 40 178 88 162 150 C158 176 150 176 150 196 C146 178 152 160 150 150 C150 130 150 96 150 96 L50 96 C50 130 50 150 50 150 C48 160 54 178 50 196 C50 176 42 176 38 150 Z" fill="${shade}"/>`,
-      front: `<path d="M44 102 C40 52 70 34 100 34 C132 34 162 54 156 104 C150 80 140 72 128 70 C122 82 116 74 108 78 C102 88 96 82 92 76 C84 84 80 74 74 70 C60 76 50 84 44 102 Z" fill="${c}"/>`,
+      back: `<path d="M42 164 C30 92 46 48 110 48 C174 48 190 92 178 164 C174 196 164 200 168 226 C158 204 168 182 160 164 C160 130 158 104 158 104 L62 104 C62 130 60 164 60 164 C52 182 62 204 52 226 C56 200 46 196 42 164 Z" fill="${dk}"/>`,
+      side: `<path d="M56 104 C48 140 58 160 52 186 C64 172 66 140 70 108 Z" fill="${c}"/>
+             <path d="M164 104 C172 140 162 160 168 186 C156 172 154 140 150 108 Z" fill="${c}"/>`,
+      front: bangs, gloss,
     },
   };
   return S[kind] || S.long;
