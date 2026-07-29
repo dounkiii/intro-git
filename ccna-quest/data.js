@@ -538,4 +538,7 @@ const ACHIEVEMENTS = [
   { id: "rush30",       name: "スピードの申し子", desc: "サブネット・ラッシュで30問正解",  icon: "⚡" },
   { id: "cli_first",    name: "コマンド入門",     desc: "コマンド道場を初クリア",          icon: "⌨️" },
   { id: "cli_master",   name: "IOSマスター",      desc: "全コマンドシナリオをクリア",      icon: "🛠️" },
+  { id: "first_match",  name: "初マッチ",         desc: "恋活で初めてマッチ",             icon: "💘" },
+  { id: "first_love",   name: "初恋成就",         desc: "恋活で誰かと結ばれた",           icon: "💑" },
+  { id: "harem",        name: "全員攻略",         desc: "恋活で全ヒロインと結ばれた",       icon: "👑" },
 ];

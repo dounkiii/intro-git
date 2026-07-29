@@ -22,6 +22,7 @@ const DEFAULT_STATE = {
   rushBest: 0,             // サブネット・ラッシュ自己ベスト
   examTaken: 0,            // 模擬試験受験回数
   examBest: 0,             // 模擬試験の最高スコア
+  love: { matched: [], seen: [], aff: {}, beat: {}, done: [] }, // 恋活モード進行
 };
 
 let S = load();
@@ -32,6 +33,7 @@ function load() {
     if (raw) {
       const s = Object.assign({}, DEFAULT_STATE, JSON.parse(raw));
       s.adventure = Object.assign({ chapter: 0, stage: 0, hpBonus: 0, _replay: null }, s.adventure || {});
+      s.love = Object.assign({ matched: [], seen: [], aff: {}, beat: {}, done: [] }, s.love || {});
       return s;
     }
   } catch (e) { /* ignore */ }
@@ -96,7 +98,8 @@ function unlock(id) {
 
 /* ---------------------- 画面遷移 ---------------------- */
 const VIEWS = ["home", "quiz-setup", "quiz", "subnet", "flash", "ports", "result",
-  "adventure", "battle", "exam-setup", "exam", "exam-result", "rush", "cli-menu", "cli"];
+  "adventure", "battle", "exam-setup", "exam", "exam-result", "rush", "cli-menu", "cli",
+  "love", "swipe", "chat"];
 function go(view) {
   VIEWS.forEach(v => document.getElementById("view-" + v).classList.toggle("hidden", v !== view));
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -479,7 +482,10 @@ const Ports = {
  * ホーム画面の描画
  * ===================================================================== */
 const MODES = [
-  { emoji: "🗺️", title: "アドベンチャー", tag: "RPGバトル", feat: true,
+  { emoji: "💘", title: "恋活モード", tag: "恋愛シミュレーション", feat: true,
+    desc: "マッチングアプリ「NetMatch」で、CCNAエンジニアの女の子と恋を実らせよう。いいね→マッチ→チャット(CCNAトークで好感度UP)→デートへ。全5人のヒロイン攻略。",
+    act: () => Love.home() },
+  { emoji: "🗺️", title: "アドベンチャー", tag: "RPGバトル",
     desc: "パケットンを操作してモンスターと問題バトル。素早い正解でクリティカル！章を進めて全領域を制覇。",
     act: () => { Adventure.renderMap(); go("adventure"); } },
   { emoji: "📝", title: "模擬試験", tag: "本番形式",
