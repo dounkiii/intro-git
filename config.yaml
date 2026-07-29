@@ -49,6 +49,6 @@ publishing:
 # Threads（テキスト投稿）の設定。docs/threads-monetization-strategy.md を参照。
 threads:
   max_chars: 500                 # 1投稿の文字数上限（読みやすさ優先で短め）
-  # 行動喚起（CTA）。価値提供 → フォロー/保存/プロフィールのリンク誘導へ。
-  cta: '参考になったらフォローと保存を！ 詳しくはプロフィールのリンクから。'
-  hashtags: ['#AI活用', '#副業', '#時事']
+  # 行動喚起（CTA）。集客 → プロフィールの note リンクへ送客する。
+  cta: '続きと詳しい手順は note にまとめました → プロフィールのリンクから。フォロー&保存もぜひ。'
+  hashtags: ['#AI活用', '#副業', '#note']
