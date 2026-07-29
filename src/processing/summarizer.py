@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 
 from ..config import Config
-from ..models import Topic, VideoScript
+from ..models import Topic, ThreadsPost, VideoScript
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,38 @@ class Summarizer:
             slides=slides,
             narration=narration,
             description=description,
+            source_urls=[t.url for t in topic.tweets if t.url],
+        )
+
+    def build_thread(self, topic: Topic) -> ThreadsPost:
+        """Topic から Threads 用のテキスト投稿を生成する。
+
+        Threads は「フック（1行目）→ 本文（要点）→ CTA」で伸びやすい。
+        `config.yaml` の `threads` セクションで CTA / ハッシュタグを調整できる。
+        """
+        threads_cfg = self.config.section("threads")
+        cta = threads_cfg.get("cta", "参考になったらフォローと保存をお願いします。")
+        hashtags: list[str] = threads_cfg.get("hashtags", self.hashtags)
+
+        label = CATEGORY_LABEL.get(topic.category, "ニュース")
+        tweet = topic.tweets[0]
+        body_text = tweet.text.replace("\n", " ").strip()
+
+        hook = f"【{label}】{topic.headline}"
+
+        points = [f"・{self._trim(body_text, 90)}", "・詳しい経緯は一次情報（公式発表・報道）を確認"]
+        if "unverified_claim" in topic.safety_flags:
+            points.append("・※未確認の情報を含む可能性があります")
+        if "no_verified_source" in topic.safety_flags:
+            points.append("・（出典は認証アカウント以外を含みます）")
+        body = "\n".join(points)
+
+        return ThreadsPost(
+            topic_category=topic.category,
+            hook=hook,
+            body=body,
+            cta=cta,
+            hashtags=hashtags,
             source_urls=[t.url for t in topic.tweets if t.url],
         )
 

@@ -2,7 +2,10 @@
 
 Twitter(X) から「炎上」「税金問題」に関する話題を収集し、要約スクリプトを生成、
 TTS(音声合成) + スライドで縦型ショート動画を作り、TikTok へ投稿するための
-モジュラーなパイプラインです。
+モジュラーなパイプラインです。**Threads（テキスト投稿）への出力**にも対応しています。
+
+> Threads で稼ぐための運用戦略（AI で自動化する具体策・90日ロードマップ・収益導線）は
+> [`docs/threads-monetization-strategy.md`](docs/threads-monetization-strategy.md) を参照してください。
 
 ## ⚠️ 重要な前提（必ず読んでください）
 
@@ -56,6 +59,9 @@ python -m src.pipeline review --list
 # 承認済みアイテムを TikTok へ投稿（DRY_RUN=false のとき実投稿）
 python -m src.pipeline publish --approved
 
+# Threads（テキスト）へ投稿する場合は --target threads
+python -m src.pipeline publish --approved --target threads
+
 # 定期実行（cron 相当）
 python -m src.scheduler --interval 3600
 ```
@@ -66,6 +72,8 @@ python -m src.scheduler --interval 3600
 |------|------|
 | `X_BEARER_TOKEN` | X API v2 Bearer Token |
 | `TIKTOK_ACCESS_TOKEN` | TikTok Content Posting API のアクセストークン |
+| `THREADS_ACCESS_TOKEN` | Threads API (Meta Graph API) のアクセストークン |
+| `THREADS_USER_ID` | 投稿先の Threads ユーザー ID |
 | `OPENAI_API_KEY` | （任意）スクリプト要約に LLM を使う場合 |
 | `DRY_RUN` | `true`（既定）だと実投稿せずファイル出力のみ |
 | `REVIEW_REQUIRED` | `true`（既定）だと承認前は投稿しない |
@@ -90,6 +98,7 @@ src/
   publishers/
     review_queue.py    人間レビュー用キュー
     tiktok.py          TikTok Content Posting API
+    threads.py         Threads API（テキスト投稿）
   pipeline.py          全体オーケストレーション（CLI）
   scheduler.py         定期実行
 ```

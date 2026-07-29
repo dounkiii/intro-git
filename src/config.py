@@ -40,6 +40,8 @@ class Config:
     # secrets
     x_bearer_token: str = ""
     tiktok_access_token: str = ""
+    threads_access_token: str = ""
+    threads_user_id: str = ""
     openai_api_key: str = ""
 
     # safety switches
@@ -60,6 +62,8 @@ class Config:
             raw=raw,
             x_bearer_token=os.getenv("X_BEARER_TOKEN", ""),
             tiktok_access_token=os.getenv("TIKTOK_ACCESS_TOKEN", ""),
+            threads_access_token=os.getenv("THREADS_ACCESS_TOKEN", ""),
+            threads_user_id=os.getenv("THREADS_USER_ID", ""),
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
             dry_run=_bool_env("DRY_RUN", True),
             review_required=_bool_env("REVIEW_REQUIRED", True),

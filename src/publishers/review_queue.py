@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 
 from ..config import REVIEW_DIR
-from ..models import VideoScript
+from ..models import ThreadsPost, VideoScript
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,7 @@ class ReviewItem:
     script: dict
     video_path: str
     safety_flags: list[str]
+    thread_post: dict = field(default_factory=dict)  # Threads 用テキスト投稿（任意）
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -35,13 +36,15 @@ class ReviewQueue:
         self.dir.mkdir(parents=True, exist_ok=True)
 
     def enqueue(self, item_id: str, script: VideoScript, video_path: Path,
-                safety_flags: list[str]) -> ReviewItem:
+                safety_flags: list[str],
+                thread_post: ThreadsPost | None = None) -> ReviewItem:
         item = ReviewItem(
             id=item_id,
             status="pending",
             script=script.to_dict(),
             video_path=str(video_path),
             safety_flags=safety_flags,
+            thread_post=thread_post.to_dict() if thread_post else {},
         )
         self._path(item_id).write_text(
             json.dumps(item.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"

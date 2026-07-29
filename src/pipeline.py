@@ -19,6 +19,7 @@ from .processing.summarizer import Summarizer
 from .video.builder import VideoBuilder
 from .publishers.review_queue import ReviewQueue
 from .publishers.tiktok import TikTokPublisher
+from .publishers.threads import ThreadsPublisher
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("pipeline")
@@ -34,6 +35,7 @@ class Pipeline:
         self.video = VideoBuilder(self.config)
         self.queue = ReviewQueue()
         self.publisher = TikTokPublisher(self.config)
+        self.threads_publisher = ThreadsPublisher(self.config)
 
     def run(self, limit: int = 10, use_sample: bool | None = None) -> list[str]:
         """収集から動画生成・レビュー投入まで。生成した item_id のリストを返す。"""
@@ -44,29 +46,41 @@ class Pipeline:
         item_ids: list[str] = []
         for topic in topics:
             script = self.summarizer.build_script(topic)
+            thread_post = self.summarizer.build_thread(topic)
             item_id = f"{topic.category}-{topic.tweets[0].id}"
             out_path = OUTPUT_DIR / f"{item_id}.mp4"
             video_path = self.video.build(script, out_path)
-            self.queue.enqueue(item_id, script, video_path, topic.safety_flags)
+            self.queue.enqueue(item_id, script, video_path, topic.safety_flags,
+                               thread_post=thread_post)
             item_ids.append(item_id)
 
         logger.info("run 完了: %d 件をレビューキューに投入", len(item_ids))
         return item_ids
 
-    def publish_approved(self) -> list[dict]:
-        """承認済みアイテムを投稿。REVIEW_REQUIRED=false なら pending も対象。"""
+    def publish_approved(self, target: str = "tiktok") -> list[dict]:
+        """承認済みアイテムを投稿。REVIEW_REQUIRED=false なら pending も対象。
+
+        target: "tiktok"（動画）または "threads"（テキスト）。
+        """
         statuses = ["approved"] if self.config.review_required else ["approved", "pending"]
         results: list[dict] = []
         for status in statuses:
             for item in self.queue.list_items(status=status):
-                video_path = Path(item.video_path)
-                from .models import VideoScript
-                script = VideoScript(**item.script)
-                result = self.publisher.publish(video_path, script)
+                if target == "threads":
+                    from .models import ThreadsPost
+                    if not item.thread_post:
+                        logger.warning("Threads 投稿データがありません: %s", item.id)
+                        continue
+                    post = ThreadsPost(**item.thread_post)
+                    result = self.threads_publisher.publish(post)
+                else:
+                    from .models import VideoScript
+                    script = VideoScript(**item.script)
+                    result = self.publisher.publish(Path(item.video_path), script)
                 results.append({"id": item.id, "result": result})
                 if not self.config.dry_run:
                     self.queue.set_status(item.id, "published")
-        logger.info("publish 完了: %d 件", len(results))
+        logger.info("publish 完了 (%s): %d 件", target, len(results))
         return results
 
 
@@ -93,7 +107,7 @@ def _cmd_review(args) -> None:
 
 
 def _cmd_publish(args) -> None:
-    Pipeline().publish_approved()
+    Pipeline().publish_approved(target=args.target)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -112,8 +126,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_rev.add_argument("--reject", metavar="ITEM_ID")
     p_rev.set_defaults(func=_cmd_review)
 
-    p_pub = sub.add_parser("publish", help="承認済みを TikTok へ投稿")
+    p_pub = sub.add_parser("publish", help="承認済みを TikTok / Threads へ投稿")
     p_pub.add_argument("--approved", action="store_true")
+    p_pub.add_argument("--target", choices=["tiktok", "threads"], default="tiktok",
+                       help="投稿先（既定: tiktok）")
     p_pub.set_defaults(func=_cmd_publish)
 
     return parser
