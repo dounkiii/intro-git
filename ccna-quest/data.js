@@ -475,6 +475,119 @@ QUIZ_BANK.push(
 );
 
 /* =====================================================================
+ * 追加問題バンク #2 (かぶり防止のための増量)
+ * ===================================================================== */
+QUIZ_BANK.push(
+  // ---- 基礎 ----
+  { domain: "fundamentals", diff: 1, q: "プライベートIPアドレスの範囲として正しくないものは？",
+    choices: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10"], answer: 3,
+    exp: "RFC1918のプライベートは 10/8・172.16/12・192.168/16。100.64.0.0/10 はCGN(キャリアグレードNAT)用です。" },
+  { domain: "fundamentals", diff: 2, q: "IPヘッダのTTLフィールドの主な目的は？",
+    choices: ["帯域制御", "ループするパケットの無限転送を防ぐ", "暗号化", "優先度の指定"], answer: 1,
+    exp: "TTLはルータを通るたびに1減り、0で破棄。ルーティングループでパケットが永久に回るのを防ぎます。" },
+  { domain: "fundamentals", diff: 1, q: "1対1で1台の宛先だけに送る通信の種類は？",
+    choices: ["ユニキャスト", "ブロードキャスト", "マルチキャスト", "エニーキャスト"], answer: 0,
+    exp: "ユニキャスト=1対1。ブロードキャストは全体、マルチキャストは特定グループ宛です。" },
+  { domain: "fundamentals", diff: 2, q: "無線LAN(802.11)で衝突を『回避』するために使うアクセス制御方式は？",
+    choices: ["CSMA/CD", "CSMA/CA", "トークンパッシング", "TDMA"], answer: 1,
+    exp: "無線はCSMA/CA(衝突回避)。有線イーサネットの半二重で使われたのはCSMA/CD(衝突検出)です。" },
+  { domain: "fundamentals", diff: 2, q: "ルータ間のポイントツーポイント接続に最も適したサブネットは？",
+    choices: ["/24", "/28", "/30", "/32"], answer: 2,
+    exp: "/30 は使用可能ホストが2つ=2台のちょうど良いサイズ。IPを節約できます(/31も点対点で使用可)。" },
+  { domain: "fundamentals", diff: 1, q: "ホスト名をIPアドレスに変換するサービスは？",
+    choices: ["DHCP", "DNS", "NAT", "ARP"], answer: 1,
+    exp: "DNSが名前→IP解決。DHCPはIP配布、ARPはIP→MAC、NATはアドレス変換です。" },
+  { domain: "fundamentals", diff: 3, q: "フレームの宛先を全部受信してから転送する、エラーチェックありのスイッチング方式は？",
+    choices: ["カットスルー", "フラグメントフリー", "ストアアンドフォワード", "フロー制御"], answer: 2,
+    exp: "ストアアンドフォワードはフレーム全体を受信しFCSでエラーチェックしてから転送。カットスルーは宛先MACだけ見て即転送(高速だがエラーも通す)。" },
+
+  // ---- ネットワークアクセス ----
+  { domain: "access", diff: 2, q: "隣接スイッチと自動でトランク/アクセスを折衝するCisco独自プロトコルは？",
+    choices: ["VTP", "DTP", "STP", "CDP"], answer: 1,
+    exp: "DTP(Dynamic Trunking Protocol)がトランク折衝。セキュリティ上は switchport nonegotiate で無効化推奨。VTPはVLAN情報の同期です。" },
+  { domain: "access", diff: 2, q: "エンドユーザ用アクセスポートで、BPDUを受信したらポートをerr-disableにする機能は？",
+    choices: ["Root Guard", "BPDU Guard", "Loop Guard", "PortFast"], answer: 1,
+    exp: "BPDU GuardはPortFastポートでBPDUを受けたら遮断し、不正なスイッチ接続やループを防ぎます。" },
+  { domain: "access", diff: 1, q: "2.4GHz帯で電波が重ならない(非オーバーラップ)チャネルの組み合わせは？",
+    choices: ["1・6・11", "1・2・3", "1・5・10", "全チャネル重ならない"], answer: 0,
+    exp: "2.4GHzで実用上重ならないのは1/6/11の3つ。隣接APで同じ/近いチャネルを使うと干渉します。" },
+  { domain: "access", diff: 2, q: "IP電話とPCを1つのポートで収容するとき、音声トラフィック用に設定するのは？",
+    choices: ["ネイティブVLAN", "音声VLAN(voice vlan)", "管理VLAN", "トランクVLAN"], answer: 1,
+    exp: "音声VLANでIP電話の音声をデータVLANと分離し、QoSや管理をしやすくします。" },
+  { domain: "access", diff: 3, q: "WLCに管理されるAPで、WAN越しでもローカルにトラフィックをスイッチできる動作モードは？",
+    choices: ["Localモード", "FlexConnectモード", "Snifferモード", "Monitorモード"], answer: 1,
+    exp: "FlexConnectはブランチ拠点向け。WLCへの接続が切れてもローカルSWで通信を継続できます。" },
+  { domain: "access", diff: 2, q: "スイッチのMACアドレステーブルで、一定時間通信がないエントリが削除される仕組みは？",
+    choices: ["フラッディング", "エージング(aging)", "ラーニング", "フィルタリング"], answer: 1,
+    exp: "エージングタイマー(既定300秒)で古いMACエントリを削除し、テーブルを最新に保ちます。" },
+
+  // ---- IPコネクティビティ ----
+  { domain: "connectivity", diff: 2, q: "複数OSPFエリアを持つ構成で、エリア間を接続するルータの役割は？",
+    choices: ["ABR (Area Border Router)", "ASBR", "DR", "BDR"], answer: 0,
+    exp: "ABRは複数エリアに属しエリア間を仲介。ASBRは外部ルート(再配布)を持ち込むルータです。" },
+  { domain: "connectivity", diff: 3, q: "OSPFでDR/BDRの選出が行われるネットワークタイプは？",
+    choices: ["ポイントツーポイント", "ブロードキャストマルチアクセス", "ループバック", "ポイントツーマルチポイント"], answer: 1,
+    exp: "DR/BDRはブロードキャスト/NBMAなどマルチアクセスで選出。点対点リンクでは不要です。" },
+  { domain: "connectivity", diff: 3, q: "EIGRPで、ダウン時に即座に使える計算済みのバックアップ経路は？",
+    choices: ["サクセサ", "フィージブルサクセサ", "スタブ", "ネイバー"], answer: 1,
+    exp: "サクセサが主経路、フィージブルサクセサ(FS)が事前計算済みバックアップ。FSがあれば即切替でき収束が速い。" },
+  { domain: "connectivity", diff: 2, q: "IPv6でインタフェースが自分でアドレスを自動生成する仕組みは？",
+    choices: ["DHCPv4", "SLAAC", "NAT66", "ARP"], answer: 1,
+    exp: "SLAAC(ステートレスアドレス自動設定)はRAのプレフィックス+EUI-64等でIPv6アドレスを自動生成します。" },
+  { domain: "connectivity", diff: 1, q: "ルーティングテーブルで直接接続された『そのインタフェースのIP』を示すコードは？",
+    choices: ["C", "L", "S", "O"], answer: 1,
+    exp: "C=接続ネットワーク、L=ローカル(/32のインタフェース自身)、S=スタティック、O=OSPFです。" },
+  { domain: "connectivity", diff: 2, q: "特定の宛先を意図的に破棄する『ブラックホール』ルートで使う出力先は？",
+    choices: ["Null0インタフェース", "Loopback0", "デフォルトゲートウェイ", "ブロードキャスト"], answer: 0,
+    exp: "ip route <net> <mask> Null0 で該当宛先を破棄。集約や不要トラフィックの遮断に使います。" },
+
+  // ---- IPサービス ----
+  { domain: "services", diff: 2, q: "別サブネットのDHCPサーバへ要求を中継するためにルータのインタフェースに設定するのは？",
+    choices: ["ip helper-address", "ip dhcp pool", "ip nat inside", "ip default-gateway"], answer: 0,
+    exp: "ip helper-address <サーバIP> でブロードキャストのDHCP DiscoverをユニキャストでDHCPサーバへ中継(DHCPリレー)します。" },
+  { domain: "services", diff: 1, q: "NATで1対1に固定的に変換する方式は？",
+    choices: ["スタティックNAT", "ダイナミックNAT", "PAT", "CGN"], answer: 0,
+    exp: "スタティックNATは内部→外部を1対1固定(サーバ公開等)。PATはポートで多重化して多対1にします。" },
+  { domain: "services", diff: 2, q: "SNMPで管理対象の情報を階層的に定義した『データベース』とその識別子は？",
+    choices: ["MIBとOID", "ACLとVLAN", "LSAとエリア", "DORAとリース"], answer: 0,
+    exp: "MIB(管理情報ベース)の各項目をOID(オブジェクト識別子)で指定して値を取得/設定します。" },
+  { domain: "services", diff: 3, q: "QoSで、遅延に敏感な音声(VoIP)に推奨されるキューイングは？",
+    choices: ["FIFO", "LLQ(低遅延キューイング)", "WRED", "シェーピング"], answer: 1,
+    exp: "LLQは優先キューで音声を最優先処理し、遅延・ジッタを最小化します。VoIPの定番です。" },
+  { domain: "services", diff: 1, q: "IOSイメージのバックアップ/復元によく使われる、軽量でUDPベースの転送は？",
+    choices: ["FTP", "TFTP", "HTTP", "SSH"], answer: 1,
+    exp: "TFTP(UDP69)は軽量でIOSやconfigの転送に多用。認証やディレクトリ機能はありません。" },
+
+  // ---- セキュリティ ----
+  { domain: "security", diff: 1, q: "パスワードを暗号化して保存する、推奨される特権モードのパスワード設定は？",
+    choices: ["enable password", "enable secret", "service password", "line password"], answer: 1,
+    exp: "enable secret はハッシュ化して保存。enable password は平文/弱い暗号なので非推奨です。" },
+  { domain: "security", diff: 3, q: "802.1Xで、認証を受けようとする端末(クライアント)の役割名は？",
+    choices: ["オーセンティケータ", "サプリカント", "認証サーバ", "RADIUS"], answer: 1,
+    exp: "サプリカント=端末、オーセンティケータ=スイッチ/AP、認証サーバ=RADIUS。3者で802.1X認証を行います。" },
+  { domain: "security", diff: 2, q: "拡張ACLで『192.168.1.0/24 全体』にマッチさせるワイルドカードマスクは？",
+    choices: ["0.0.0.255", "255.255.255.0", "0.0.0.0", "0.0.255.255"], answer: 0,
+    exp: "ワイルドカードはサブネットマスクの反転。/24 → 0.0.0.255。0=一致必須、1=任意ビットです。" },
+  { domain: "security", diff: 2, q: "VTYラインへのSSH/Telnetアクセスを制限するときにACLを適用するコマンドは？",
+    choices: ["ip access-group", "access-class", "switchport port-security", "ip nat inside"], answer: 1,
+    exp: "VTY回線では access-class <ACL> in を使います。ip access-group はインタフェース用です。" },
+  { domain: "security", diff: 1, q: "利用者を騙して情報を聞き出す、技術的でない攻撃手法の総称は？",
+    choices: ["DDoS", "ソーシャルエンジニアリング", "総当たり攻撃", "スプーフィング"], answer: 1,
+    exp: "ソーシャルエンジニアリング(なりすまし電話・フィッシング等)は人の心理を突く攻撃。教育と多要素認証が対策です。" },
+
+  // ---- 自動化 ----
+  { domain: "automation", diff: 2, q: "REST APIで、リソースを『全置換で更新』するHTTPメソッドは？",
+    choices: ["GET", "POST", "PUT", "DELETE"], answer: 2,
+    exp: "PUTは全体置換、PATCHは部分更新。POSTは新規作成、GETは取得です。" },
+  { domain: "automation", diff: 3, q: "ネットワーク機器の設定を機械可読なデータモデルで扱う、NETCONF/RESTCONFが使う言語は？",
+    choices: ["YANG", "YAML", "Python", "Bash"], answer: 0,
+    exp: "YANGはNETCONF/RESTCONFのデータモデリング言語。設定・状態を構造化して定義します。" },
+  { domain: "automation", diff: 2, q: "何回実行しても結果(最終状態)が同じになる、構成管理で重要な性質は？",
+    choices: ["冪等性(idempotency)", "再帰性", "揮発性", "並列性"], answer: 0,
+    exp: "冪等性=同じ操作を繰り返しても状態が変わらない。Ansible等の宣言的ツールの基本特性です。" },
+);
+
+/* =====================================================================
  * フラッシュカード (用語 → 意味)
  * ===================================================================== */
 const FLASHCARDS = [
