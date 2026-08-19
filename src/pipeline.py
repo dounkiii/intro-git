@@ -67,7 +67,8 @@ class Pipeline:
 
         collected = self.collector.collect(use_sample=use_sample)
         topics = self.classifier.build_topics(collected)
-        topics = self.safety.filter_topics(topics)[:limit]
+        topics = self.safety.filter_topics(topics)
+        topics = self._apply_item_caps(topics)[:limit]
 
         if not self.summarizer.llm.available:
             logger.warning("ANTHROPIC_API_KEY が未設定のため、テンプレ生成で動作します。"
@@ -92,6 +93,37 @@ class Pipeline:
 
         logger.info("run 完了: %d 件をレビューキューに投入", len(item_ids))
         return item_ids
+
+    @staticmethod
+    def _apply_item_caps(topics: list) -> list:
+        """投資レベルごとの本数上限を適用する（src/scout/commitment.py）。
+
+        CHEAP_TEST のニッチから大量に作ってしまうと「小さく試す」が成立しない。
+        上限のないカテゴリ（既定のニッチ）はそのまま通す。
+        """
+        try:
+            from .scout.niches import NicheRegistry
+
+            caps = NicheRegistry().item_caps()
+        except Exception as exc:
+            logger.debug("本数上限の読み込みをスキップしました: %s", exc)
+            return topics
+        if not caps:
+            return topics
+
+        used: dict[str, int] = {}
+        kept = []
+        for topic in topics:
+            cap = caps.get(topic.category)
+            if cap is not None:
+                if used.get(topic.category, 0) >= cap:
+                    continue
+                used[topic.category] = used.get(topic.category, 0) + 1
+            kept.append(topic)
+        dropped = len(topics) - len(kept)
+        if dropped:
+            logger.info("投資レベルの上限により %d 件を見送りました: %s", dropped, used)
+        return kept
 
     def _open_approval_issue(self, cards: list[tuple]) -> None:
         from datetime import date
@@ -121,12 +153,17 @@ class Pipeline:
             return self._render_status()
 
         # 探索レイヤのコマンド。scout は重い import を持つので遅延ロードする。
-        if cmd.action in ("adopt", "drop", "metrics"):
+        if cmd.action in ("adopt", "test", "scale", "drop", "metrics"):
             from .scout import ScoutPipeline
+            from .scout.commitment import CHEAP_TEST, SCALE
 
             scout = ScoutPipeline(self.config)
             if cmd.action == "adopt":
                 return scout.adopt(cmd.target)
+            if cmd.action == "test":
+                return scout.adopt(cmd.target, level=CHEAP_TEST)
+            if cmd.action == "scale":
+                return scout.adopt(cmd.target, level=SCALE)
             if cmd.action == "drop":
                 return scout.drop(cmd.target)
             return scout.record_metrics(cmd.target, _parse_metrics(cmd.note))

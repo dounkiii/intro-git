@@ -8,7 +8,9 @@
   /approve all                未処理を一括承認（safety_flags 付きは除外）
   /status                     キュー状況を返信
   /revenue <金額> <ASP名> [メモ]  収益を記録
-  /adopt   <opportunity_id>   探索レイヤのネタを採用して制作を始める
+  /adopt   <opportunity_id>   探索レイヤのネタを採用して制作を始める（確信度でレベル自動判定）
+  /test    <opportunity_id>   小さく試す（CHEAP_TEST）。少ない本数で実データを取る
+  /scale   <opportunity_id>   生成枠を増やす（SCALE）
   /drop    <opportunity_id>   そのネタを捨てる
   /m <niche> <累計views> <累計revenue>
                               実績を記録してファネル段階を診断する（/metrics も同じ）
@@ -31,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 API_ROOT = "https://api.github.com"
 COMMAND_RE = re.compile(
-    r"^\s*/(approve|reject|status|revenue|adopt|drop|metrics|m)\b[ \t]*(.*)$",
+    r"^\s*/(approve|reject|status|revenue|adopt|drop|metrics|m|test|scale)\b[ \t]*(.*)$",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -40,7 +42,7 @@ COMMAND_RE = re.compile(
 class Command:
     """コメントから抽出した 1 コマンド。"""
 
-    action: str            # approve | reject | status | revenue | adopt | drop | metrics
+    action: str            # approve|reject|status|revenue|adopt|test|scale|drop|metrics
     target: str = ""       # item_id または "all"
     note: str = ""         # 却下理由 / 収益のメモ
 

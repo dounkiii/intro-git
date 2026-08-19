@@ -26,7 +26,9 @@ import math
 
 from ..config import Config
 from ..llm import ClaudeClient
-from .models import RUBRIC, VERDICTS, Candidate, Opportunity, Research, Score
+from .models import (MONETIZATION_IMMEDIATE, MONETIZATION_NONE,
+                     MONETIZATION_POTENTIAL, RUBRIC, VERDICTS, Candidate,
+                     Opportunity, Research, Score)
 from .serp import SerpAnalyzer, weakness_to_points
 
 logger = logging.getLogger(__name__)
@@ -158,7 +160,7 @@ class Scorer:
         self._observe_competition(score, research)
         self._observe_growth(score, candidate, times_seen)
         self._observe_reliability(score, research)
-        score.route_available = self._has_route(candidate, research)
+        score.monetization_readiness = self._monetization_readiness(candidate, research)
 
     def _observe_competition(self, score: Score, research: Research) -> None:
         """SERP の守備力から「競合の少なさ」を実測で置き換える。"""
@@ -219,11 +221,17 @@ class Scorer:
                                source="evidence_count", confidence=0.8,
                                note=f"独立ドメイン{domains}件 / 根拠URL{evidence_count}件")
 
-    def _has_route(self, candidate: Candidate, research: Research) -> bool:
-        """自前の設定と AFF_* で換金経路が組めるかを実測する。
+    # 換金の道がありそうかを示す語。調査結果から potential を判定するのに使う。
+    POTENTIAL_HINTS = ("有料", "販売", "商品", "サービス", "SaaS", "ツール", "講座",
+                       "テンプレート", "リード", "見積", "相談", "比較", "note", "案件")
 
-        これが False の候補は Business Score が大きく下がる。換金経路のないネタに
-        制作能力を割かないため（既存 PLAYBOOK の「アフィリエイト・ファースト」と整合）。
+    def _monetization_readiness(self, candidate: Candidate, research: Research) -> str:
+        """換金の準備度を3値で実測する。
+
+        `immediate` は自前の AFF_* から実測。無い場合でも、調査結果に具体的な
+        収益化手段や商品が挙がっていれば `potential` とする。
+        **「AFF_* が無い = 金にならない」と学習させないための構造**（GPT提案④）。
+        exploit は immediate を、explore は potential も評価する。
         """
         if self._affiliate is None:
             from ..monetize.affiliate import AffiliateEngine
@@ -232,8 +240,12 @@ class Scorer:
 
         for key in [*candidate.keywords, "default"]:
             if self._affiliate.build(key).has_route:
-                return True
-        return False
+                return MONETIZATION_IMMEDIATE
+
+        text = " ".join([*research.monetization_paths, research.best_product])
+        if research.monetization_paths or any(h in text for h in self.POTENTIAL_HINTS):
+            return MONETIZATION_POTENTIAL
+        return MONETIZATION_NONE
 
     def _record_divergences(self, score: Score) -> None:
         """推測と実測のズレを矛盾として記録する（減点はしない）。"""

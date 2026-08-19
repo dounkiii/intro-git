@@ -13,7 +13,9 @@ import logging
 from pathlib import Path
 
 from ..config import Config
-from .explore import allocate
+from .commitment import (ADOPT, CHEAP_TEST, EXIT, LABELS, budget_for,
+                         initial_level, next_level)
+from .explore import allocate, pick_speculative
 from .ledger import ExperimentLedger
 from .models import Candidate, Opportunity
 from .niches import NicheRegistry
@@ -106,9 +108,10 @@ class ScoutPipeline:
         shown = [o for o in opportunities if o.verdict != "drop"]
         ranked = self.scorer.rank(shown)
 
-        # explore 枠に相当する「高スコアだが根拠が薄い」候補は、埋もれさせずに
+        # explore 枠に相当する「機会は高いが確信は低い」候補は、埋もれさせずに
         # 上位へ1件だけ繰り上げる。確信が高いものだけ試していると学習が進まない。
-        speculative = next((o for o in ranked[self.top_n:] if o.score.speculative), None)
+        # 選定は固定しきい値ではなく候補集合内の相対順位で行う。
+        speculative = pick_speculative(ranked[self.top_n:])
         if speculative and len(ranked) > self.top_n:
             ranked.remove(speculative)
             ranked.insert(min(self.top_n - 1, len(ranked)), speculative)
@@ -129,31 +132,54 @@ class ScoutPipeline:
                     if int(r.get("metrics", {}).get("revenue_jpy", 0)) > 0})
 
     # ------------------------------------------------------------------
-    def adopt(self, opportunity_id: str) -> str:
-        """機会を採用し、制作パイプラインのニッチに登録する。"""
+    def adopt(self, opportunity_id: str, level: str | None = None) -> str:
+        """機会を採用し、制作パイプラインのニッチに登録する。
+
+        `level` を省略すると、確信度から投資レベルを自動で決める。
+        確信が低い候補は watch に落とさず CHEAP_TEST（小さく試す）に送る。
+        """
         opportunity = self.store.get(opportunity_id)
         if opportunity is None:
             return f"⚠️ `{opportunity_id}` が見つかりません。"
 
-        niche = self.niches.adopt(opportunity)
+        score = opportunity.score
+        commitment = level or initial_level(
+            opportunity.verdict, score.confidence, score.opportunity,
+            now_confidence=self.scorer.now_confidence)
+        reason = (f"機会{score.opportunity} / 確信{score.confidence:.2f} / "
+                  f"判定{opportunity.verdict}")
+
+        niche = self.niches.adopt(opportunity, commitment=commitment, reason=reason)
         self.store.set_status(opportunity_id, "adopted")
 
         # 予測を凍結する。以後書き換えないので、後から「予測が当たったか」を検証できる。
-        self.ledger.record_prediction(opportunity, niche.slug)
+        self.ledger.record_prediction(opportunity, niche.slug, commitment=commitment)
         self.ledger.record_attention("adopt", niche.slug)
 
-        return "\n".join([
+        budget = budget_for(commitment)
+        lines = [
             f"✅ `{opportunity_id}` を採用しました。",
             f"　ニッチ: `{niche.slug}` — {niche.label}",
+            f"　**投資レベル: {commitment}（{LABELS.get(commitment, '')}）**"
+            f" — 1回の生成で最大{budget.items_per_run}本"
+            + (f" / 公開上限{budget.test_posts}本" if budget.test_posts else ""),
             f"　検索クエリ: `{niche.query}`",
             f"　最初に作るもの: {niche.best_product or '（未検討）'}",
-            f"　予測: 機会{opportunity.score.opportunity} "
-            f"(発見{opportunity.score.discovery} / 収益{opportunity.score.business})"
-            f" 実測率{opportunity.score.observed_ratio:.0%}",
-            "",
-            "翌朝の生成ジョブからこのテーマで台本と記事が作られます。",
-            f"実績は `/metrics {niche.slug} posts=8 impressions=4000 clicks=20` で記録してください。",
-        ])
+            f"　予測: 機会{score.opportunity} / 確信{score.confidence:.2f}"
+            f"（発見{score.discovery} / 収益{score.business}）",
+        ]
+        if commitment == CHEAP_TEST:
+            lines += [
+                "",
+                "確信が低いので **小さく試す** モードです。少ない本数で実データを取り、",
+                "配信が成立すれば自動で通常運用（ADOPT）に上がります。",
+            ]
+        lines += ["", f"実績は `/m {niche.slug} <累計views> <累計revenue>` で記録してください。"]
+        return "\n".join(lines)
+
+    def cheap_test(self, opportunity_id: str) -> str:
+        """明示的に「小さく試す」で採用する。"""
+        return self.adopt(opportunity_id, level=CHEAP_TEST)
 
     def drop(self, opportunity_id: str) -> str:
         if self.store.get(opportunity_id) is None:
@@ -195,10 +221,25 @@ class ScoutPipeline:
             attention_minutes=self.ledger.attention_minutes(niche_slug),
             api_cost_jpy=values.get("cost", 0),
         )
-        outcome = self.ledger.record_outcome(metrics)
+        niche = next((n for n in self.niches.load() if n.slug == niche_slug), None)
+        creatives = max(1, niche.creatives_tried if niche else 1)
+
+        outcome = self.ledger.record_outcome(metrics, creatives_tried=creatives)
         self.ledger.record_attention("metrics", niche_slug)
-        verdict = self.ledger.diagnoser_for(metrics).diagnose(metrics)
+        verdict = self.ledger.diagnoser_for(metrics).diagnose(metrics, creatives)
         m = verdict.metrics
+
+        # 実績から投資レベルを自動で遷移させる（推測では動かさない）
+        transition = ""
+        if niche:
+            level, why = next_level(niche.commitment, verdict.stage, verdict.decided,
+                                    metrics.revenue_jpy, metrics.posts, creatives)
+            if level != niche.commitment:
+                self.niches.set_commitment(niche_slug, level, why)
+                transition = (f"**投資レベル: {niche.commitment} → {level}"
+                              f"（{LABELS.get(level, '')}）** — {why}")
+            else:
+                transition = f"投資レベル: {niche.commitment} のまま — {why}"
 
         lines = [
             f"📊 `{niche_slug}` の実績を記録しました"
@@ -206,9 +247,12 @@ class ScoutPipeline:
             "",
             f"**Stage {outcome.stage}: {outcome.stage_label}**",
             f"→ {verdict.prescription}",
-            "",
-            f"- {verdict.reason}",
         ]
+        if verdict.cause_reason:
+            lines.append(f"　推定原因: **{verdict.likely_cause}** — {verdict.cause_reason}")
+        if transition:
+            lines += ["", transition]
+        lines += ["", f"- {verdict.reason}"]
         if outcome.delta:
             lines.append("- 前回からの増分: "
                          + " / ".join(f"{k} {v:+,}" for k, v in outcome.delta.items()))
@@ -227,6 +271,9 @@ class ScoutPipeline:
 
         if verdict.should_exit:
             lines += ["", "🛑 **撤退を検討**: `/drop <opportunity_id>` で止められます。"]
+        elif verdict.retry_creative:
+            lines += ["", "🔁 **切り口を変えて再試行**: ニッチが原因とは断定できません。"
+                          "次の生成では別の角度の台本が作られます。"]
         elif outcome.stage == 0:
             lines += ["", "次回は `/m " + niche_slug + " <累計views> <累計revenue>` を入れると"
                           "段階が診断できます。入れなくても運用は止まりません。"]

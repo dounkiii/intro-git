@@ -89,3 +89,32 @@ def allocate(candidates: list[tuple[Candidate, int]], adopted_texts: list[str],
                 sum(1 for p in picked if p in exploit),
                 sum(1 for p in picked if p in explore), explore_ratio)
     return picked[:total_slots]
+
+
+def pick_speculative(opportunities: list) -> object | None:
+    """探索枠に繰り上げる候補を1件選ぶ。
+
+    固定しきい値（機会30以上・確信0.45未満）は候補の *ラベル付け* にだけ使い、
+    実際にどれを繰り上げるかは **候補集合の中の相対順位** で決める。
+    「機会の順位が高いのに確信の順位が低い」= このシステムが最も発見したいもの。
+
+    こうすると、しきい値そのものが多少ズレていても選択は壊れない
+    （GPT の指摘: 30 / 0.45 には現時点で根拠がないので、依存を薄くしておく）。
+    """
+    pool = [o for o in opportunities if o.score.scored]
+    if len(pool) < 2:
+        return None
+
+    def percentile(values: list[float], value: float) -> float:
+        return sum(1 for v in values if v < value) / (len(values) - 1)
+
+    opportunity_values = [o.score.opportunity for o in pool]
+    confidence_values = [o.score.confidence for o in pool]
+
+    best, best_gap = None, 0.0
+    for o in pool:
+        gap = (percentile(opportunity_values, o.score.opportunity)
+               - percentile(confidence_values, o.score.confidence))
+        if gap > best_gap:
+            best, best_gap = o, gap
+    return best

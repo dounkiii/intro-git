@@ -56,7 +56,7 @@ def test_確信度が低い候補には探索向きの印が付く():
     """確信度は順位に効かせないので、代わりに explore 向きだと明示する。"""
     o = _opportunity("abc", "ネタ", demand=20, low_competition=15, trend_growth=15,
                      monetizability=20, affiliate_fit=10, contentability=10, durability=5)
-    o.score.route_available = True
+    o.score.monetization_readiness = "immediate"
 
     report = render_daily_report([o], top_n=1)
 
@@ -65,11 +65,19 @@ def test_確信度が低い候補には探索向きの印が付く():
     assert "確信度はスコアに掛けていません" in report
 
 
-def test_換金経路がなければ警告が出る():
+def test_換金の準備度が表示される():
     o = _opportunity("abc", "ネタ", demand=18)
-    o.score.route_available = False
+    o.score.monetization_readiness = "none"
 
-    assert "換金経路なし" in render_daily_report([o], top_n=1)
+    assert "換金の道が見えない" in render_daily_report([o], top_n=1)
+
+
+def test_案件未設定は開拓の余地ありと表示される():
+    """「AFF_* が無い = 金にならない」と読ませない。"""
+    o = _opportunity("abc", "ネタ", demand=18)
+    o.score.monetization_readiness = "potential"
+
+    assert "開拓の余地あり" in render_daily_report([o], top_n=1)
 
 
 def test_実測で置き換えた軸が表示される():

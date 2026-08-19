@@ -4,11 +4,20 @@
 で判断する。100インプで0円と10万インプで0円は全く違う。
 
   Stage 0 判定不能            → 指標が入っていない。UNKNOWN のまま前に進める
-  Stage 1 配信されない        → テーマかフォーマットの問題（ニッチが悪い）
-  Stage 2 見られるが反応なし  → コンテンツか切り口の問題（動画が悪い）
-  Stage 3 反応はあるがCTR低   → オファーとの接続が弱い（導線が悪い）
-  Stage 4 CTRは良いがCVなし   → 商品・LP・案件選定の問題（案件が悪い）
+  Stage 1 配信されない        → 配信の失敗。**原因はまだ断定しない**
+  Stage 2 見られるが反応なし  → コンテンツか切り口の問題
+  Stage 3 反応はあるがCTR低   → オファーとの接続が弱い
+  Stage 4 CTRは良いがCVなし   → 商品・LP・案件選定の問題
   Stage 5 売れている          → 継続
+
+**Stage は症状の診断であり、原因の断定ではない。** GPT からの指摘（採用）:
+10投稿で平均100 views だとしても、原因はニッチ・フック・構成・投稿時間・
+アカウント状態・プラットフォーム相性・クリエイティブ品質が混ざっている。
+Stage 1 を「ニッチ失敗」と読むと良いニッチを捨てる。そこで
+
+  - Stage 1 の名前を DISTRIBUTION_FAILURE（配信の失敗）にした
+  - ニッチ撤退の推奨には **同ニッチ × 複数クリエイティブ** または
+    **同フォーマット × 他ニッチとの比較** を要求する（`likely_cause`）
 
 GPT との議論を経て入れた3点:
 
@@ -34,12 +43,24 @@ logger = logging.getLogger(__name__)
 
 STAGES = {
     0: ("判定不能", "指標が未入力。views か revenue を入れると診断できる"),
-    1: ("配信されない", "テーマかフォーマットの問題。ニッチを変える"),
+    1: ("配信の失敗", "配信されていない。原因は切り口かニッチか、まだ切り分けられていない"),
     2: ("見られるが反応されない", "コンテンツか切り口の問題。フックを変える"),
     3: ("反応はあるがクリックされない", "オファーとの接続が弱い。CTAを変える"),
     4: ("クリックされるが売れない", "商品・案件選定の問題。案件を変える"),
     5: ("売れている", "継続。この構成を他ニッチにも適用する"),
 }
+
+# 原因の推定。Stage（症状）とは別に持ち、断定できないときは unknown にする。
+CAUSE_UNKNOWN = "unknown"
+CAUSE_CREATIVE = "creative"       # 切り口・クリエイティブが原因の可能性が高い
+CAUSE_NICHE = "niche"             # ニッチ自体が原因の可能性が高い
+CAUSE_FUNNEL = "funnel"           # 導線・CTA
+CAUSE_OFFER = "offer"             # 商品・案件
+
+# 同ニッチで最低これだけ切り口を変えないと、ニッチ原因とは言わない
+MIN_CREATIVES_FOR_NICHE_CAUSE = 2
+# 同フォーマットの他ニッチ中央値に対してこの比率を下回れば、ニッチ側が疑わしい
+NICHE_UNDERPERFORM_RATIO = 0.3
 
 # プラットフォームごとの既定しきい値。絶対基準ではなく初期仮説。
 # 自アカウントの実績中央値が取れたらそちらを優先する。
@@ -161,12 +182,23 @@ class FunnelVerdict:
     decided: bool                       # 十分な試行回数に達したか
     reason: str = ""
     basis: str = "platform_default"     # own_baseline | platform_default
+    likely_cause: str = CAUSE_UNKNOWN   # 原因の推定。断定できなければ unknown
+    cause_reason: str = ""
     metrics: dict = field(default_factory=dict)
 
     @property
     def should_exit(self) -> bool:
-        """撤退すべきか。判定不能・試行不足では常に False。"""
-        return self.decided and self.stage == 1
+        """ニッチを捨てるべきか。
+
+        Stage 1（配信の失敗）だけでは撤退させない。原因がニッチ側だと
+        言えるだけの比較材料（複数クリエイティブ or 他ニッチとの差）が要る。
+        """
+        return self.decided and self.stage == 1 and self.likely_cause == CAUSE_NICHE
+
+    @property
+    def retry_creative(self) -> bool:
+        """切り口を変えて再試行すべきか。"""
+        return self.decided and self.stage == 1 and self.likely_cause == CAUSE_CREATIVE
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -175,7 +207,8 @@ class FunnelVerdict:
 class FunnelDiagnoser:
     def __init__(self, thresholds: dict | None = None,
                  platform: str = DEFAULT_PLATFORM,
-                 baseline_samples: list[float] | None = None):
+                 baseline_samples: list[float] | None = None,
+                 peer_samples: dict[str, float] | None = None):
         """`baseline_samples` は自アカウントの「1投稿あたりインプ」の実績列。
 
         10件以上あれば、その中央値を基準に「配信されていない」を判定する
@@ -192,6 +225,8 @@ class FunnelDiagnoser:
         self.min_ctr = float(base.get("min_ctr", 0.005))
         self.min_conversions = int(base.get("min_conversions", 1))
         self.baseline_samples = [s for s in (baseline_samples or []) if s > 0]
+        # {niche_slug: 1投稿あたりインプ}。同フォーマットの他ニッチとの比較に使う。
+        self.peer_samples = {k: v for k, v in (peer_samples or {}).items() if v > 0}
 
     # ------------------------------------------------------------------
     @property
@@ -208,7 +243,7 @@ class FunnelDiagnoser:
             return baseline * BASELINE_FAILURE_RATIO, "own_baseline"
         return self.min_impressions_per_post, "platform_default"
 
-    def diagnose(self, m: FunnelMetrics) -> FunnelVerdict:
+    def diagnose(self, m: FunnelMetrics, creatives_tried: int = 1) -> FunnelVerdict:
         floor, basis = self.distribution_floor()
 
         if not m.has_core:
@@ -223,8 +258,13 @@ class FunnelDiagnoser:
         decided = m.posts >= self.min_posts or (m.impressions or 0) >= self.min_impressions
         stage = self._stage(m, floor)
         label, prescription = STAGES[stage]
+        cause, cause_reason = self._cause(m, stage, creatives_tried)
         if not decided:
             prescription = f"まだ判定しない。{prescription}（試行回数が不足）"
+        elif stage == 1:
+            prescription = ("切り口を変えてもう一度試す" if cause == CAUSE_CREATIVE
+                            else "ニッチ側が原因の可能性が高い。撤退を検討する"
+                            if cause == CAUSE_NICHE else prescription)
 
         basis_note = ("自アカウントの実績中央値" if basis == "own_baseline"
                       else f"{self.platform} の既定値")
@@ -233,8 +273,42 @@ class FunnelDiagnoser:
             reason=f"投稿{m.posts or '?'}本 / インプ{(m.impressions or 0):,}"
                    f"（判定に必要: {self.min_posts}本 または {self.min_impressions:,}インプ）"
                    f"／配信の下限は{basis_note} {floor:.0f}",
-            basis=basis, metrics=self._metrics(m, floor),
+            basis=basis, likely_cause=cause, cause_reason=cause_reason,
+            metrics=self._metrics(m, floor),
         )
+
+    def _cause(self, m: FunnelMetrics, stage: int,
+               creatives_tried: int) -> tuple[str, str]:
+        """原因を推定する。断定できないときは unknown を返す。"""
+        if stage in (0, 5):
+            return CAUSE_UNKNOWN, ""
+        if stage == 2:
+            return CAUSE_CREATIVE, "配信はされているが反応がない"
+        if stage == 3:
+            return CAUSE_FUNNEL, "反応はあるがクリックされていない"
+        if stage == 4:
+            return CAUSE_OFFER, "クリックはあるが成約していない"
+
+        # Stage 1: ここが断定してはいけない箇所
+        if creatives_tried < MIN_CREATIVES_FOR_NICHE_CAUSE:
+            return CAUSE_CREATIVE, (
+                f"試した切り口が {creatives_tried} 種類。ニッチ原因と言うには "
+                f"{MIN_CREATIVES_FOR_NICHE_CAUSE} 種類以上を同じニッチで試す必要がある")
+
+        peers = [v for slug, v in self.peer_samples.items() if slug != m.niche]
+        if peers:
+            peer_median = statistics.median(peers)
+            if m.impressions_per_post < peer_median * NICHE_UNDERPERFORM_RATIO:
+                return CAUSE_NICHE, (
+                    f"同フォーマットの他ニッチ中央値 {peer_median:.0f} に対して "
+                    f"{m.impressions_per_post:.0f}。ニッチ側が疑わしい")
+            return CAUSE_CREATIVE, (
+                f"他ニッチ中央値 {peer_median:.0f} と大きく変わらないので、"
+                f"ニッチではなく制作側を疑う")
+
+        return CAUSE_NICHE, (
+            f"{creatives_tried} 種類の切り口で配信されなかった"
+            f"（他ニッチとの比較材料はまだ無い）")
 
     def _stage(self, m: FunnelMetrics, floor: float) -> int:
         if not self._distribution_ok(m, floor):

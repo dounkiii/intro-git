@@ -15,7 +15,7 @@ def _opportunity(oid: str = "abc") -> Opportunity:
         id=oid, candidate=Candidate(title="インボイス需要", keywords=["インボイス"]),
         score=Score(demand=18, low_competition=12, monetizability=16, trend_growth=12,
                     contentability=8, affiliate_fit=8, durability=4,
-                    source_reliability=4, scored=True, route_available=True,
+                    source_reliability=4, scored=True, monetization_readiness="immediate",
                     rationale="需要が立ち上がっている"),
         action="比較記事を1本書く")
 

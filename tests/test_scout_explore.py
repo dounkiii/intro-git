@@ -87,3 +87,34 @@ def test_勝ち数を渡すと比率が上書きされる():
                       explore_ratio=0.2, winners=0)
 
     assert [c[0].title for c in picked] == ["新規"]
+
+
+# --- 探索候補の相対選定 -------------------------------------------------------
+def test_機会順位が高く確信順位が低い候補が選ばれる():
+    """固定しきい値（30/0.45）に根拠がないので、選定は集合内の相対順位で行う。"""
+    from src.scout.explore import pick_speculative
+    from src.scout.models import Candidate, Opportunity, Score
+
+    def _o(oid, opportunity_axis, confidence):
+        score = Score(demand=opportunity_axis, low_competition=15, trend_growth=15,
+                      monetizability=opportunity_axis, affiliate_fit=10,
+                      contentability=10, durability=5, source_reliability=5,
+                      scored=True, monetization_readiness="immediate")
+        for axis, mx in (("low_competition", 15), ("trend_growth", 15)):
+            score.evidence.observe(axis, mx, score.evidence.value(axis),
+                                   source="test", confidence=confidence)
+        return Opportunity(id=oid, candidate=Candidate(title=oid), score=score)
+
+    high_op_low_conf = _o("target", 20, 0.1)
+    high_op_high_conf = _o("known", 20, 0.95)
+    low_op_low_conf = _o("weak", 2, 0.1)
+
+    picked = pick_speculative([high_op_high_conf, low_op_low_conf, high_op_low_conf])
+
+    assert picked.id == "target"
+
+
+def test_候補が1件以下なら繰り上げない():
+    from src.scout.explore import pick_speculative
+
+    assert pick_speculative([]) is None

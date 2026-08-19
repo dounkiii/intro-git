@@ -7,9 +7,15 @@
 """
 from __future__ import annotations
 
+from .commitment import CHEAP_TEST, initial_level
 from .models import Opportunity
 
 VERDICT_LABEL = {"now": "🔥 今すぐ狙う", "watch": "👀 様子見", "drop": "🗑 捨てる"}
+READINESS_LABEL = {
+    "immediate": "今すぐ可（AFF設定済）",
+    "potential": "⚠️ 案件未設定（開拓の余地あり）",
+    "none": "⚠️ 換金の道が見えない",
+}
 
 
 def _bullets(values: list[str], empty: str = "（なし）") -> str:
@@ -46,7 +52,7 @@ def render_opportunity(opportunity: Opportunity, rank: int) -> str:
         f"　発見スコア（入る余地）: 成長 {s.momentum:.0%} × 競合の空き {s.whitespace:.0%}",
         f"　収益スコア（金になるか）: 需要 {s.evidence.ratio('demand'):.0%}"
         f" × 収益化 {s.monetization:.0%} × 制作相性 {s.production_fit:.0%}"
-        f"{'' if s.route_available else '（⚠️ 換金経路なし）'}",
+        f"（換金: {READINESS_LABEL.get(s.monetization_readiness, '不明')}）",
         f"**素点**: {s.total}/100（LLM推測のみだと {s.llm_total}）　"
         f"**実測で埋まった軸**: {s.observed_ratio:.0%}",
         f"**観測回数**: {opportunity.times_seen}回",
@@ -72,8 +78,17 @@ def render_opportunity(opportunity: Opportunity, rank: int) -> str:
         lines += ["", "<details><summary>根拠（参照URL）</summary>", "",
                   _bullets(r.sources[:15]), "", "</details>"]
 
-    lines += ["", f"採用してコンテンツ制作を始める: `/adopt {opportunity.id}` ／ "
-                  f"捨てる: `/drop {opportunity.id}`", "", "---", ""]
+    suggested = initial_level(opportunity.verdict, s.confidence, s.opportunity)
+    if suggested == CHEAP_TEST:
+        lines += ["", f"**小さく試す（推奨）**: `/test {opportunity.id}`"
+                      f" — 確信が低いので少ない本数で実データを取る。"
+                      f"配信が成立すれば自動で通常運用に上がる",
+                  f"通常運用で始める: `/adopt {opportunity.id}` ／ 捨てる: `/drop {opportunity.id}`"]
+    else:
+        lines += ["", f"採用してコンテンツ制作を始める: `/adopt {opportunity.id}`"
+                      f" ／ 小さく試す: `/test {opportunity.id}`"
+                      f" ／ 捨てる: `/drop {opportunity.id}`"]
+    lines += ["", "---", ""]
     return "\n".join(lines)
 
 
@@ -98,9 +113,14 @@ def render_daily_report(ranked: list[Opportunity], top_n: int = 3,
         "🎲 が付いた候補は「スコアは高いが根拠が薄い」= 意図的に試す価値がある枠です。",
         "",
         "```",
-        "/adopt <id>   採用 → 翌朝からこのテーマでコンテンツが生成される",
+        "/test  <id>   小さく試す → 少ない本数で実データを取る（確信が低いとき）",
+        "/adopt <id>   通常運用で採用 → 翌朝からこのテーマでコンテンツが生成される",
         "/drop  <id>   捨てる → 今後この候補は再提示されない",
         "```",
+        "",
+        "確信が低い候補は `/test` があります。**確信できるまで待つのではなく、"
+        "小さく賭けて実データを取る**のが目的です。配信が成立すれば自動で通常運用に上がり、"
+        "複数の切り口でも配信されなければ自動で撤退候補になります。",
         "",
         "---",
         "",

@@ -16,6 +16,26 @@ from typing import Any
 from .evidence import EvidenceSet
 
 # ちゃっぴー案の評価軸をそのまま採用（合計100点）
+# 換金の準備度。「AFF_* が無い = 金にならない」と学習させないための3値。
+# GPT からの指摘（採用）: AFF_* の有無だけで production_fit を決めると、
+# すでに案件を持っている市場ばかり探索するシステムになり、新しい市場を発見できなくなる。
+MONETIZATION_IMMEDIATE = "immediate"   # 今すぐ AFF_* で売れる
+MONETIZATION_POTENTIAL = "potential"   # 案件は無いが商品・有料化の道がある
+MONETIZATION_NONE = "none"             # 換金の道が見えない
+
+# exploit は immediate を重視し、explore は potential も評価する。
+MONETIZATION_WEIGHT = {
+    MONETIZATION_IMMEDIATE: 1.0,
+    MONETIZATION_POTENTIAL: 0.6,
+    MONETIZATION_NONE: 0.2,
+}
+
+# speculative（高スコア×低確信）の判定しきい値。**未校正の探索仮説**であり、
+# ビジネスルールではない。Ledger が溜まったら校正する。
+SPECULATIVE_RULE_VERSION = "2026-08-19.1"
+SPECULATIVE_MIN_OPPORTUNITY = 30.0
+SPECULATIVE_MAX_CONFIDENCE = 0.45
+
 RUBRIC = {
     "demand": 20,              # 需要
     "low_competition": 15,     # 競合の少なさ
@@ -125,8 +145,8 @@ class Score:
 
     # 観測と推測の分離（src/scout/evidence.py）
     evidence: EvidenceSet = field(default_factory=EvidenceSet)
-    # 自前パイプラインで換金経路が組めるか。config と AFF_* から実測する。
-    route_available: bool | None = None
+    # 換金の準備度。config と AFF_* から実測し、無ければ調査結果から potential を判定する。
+    monetization_readiness: str = MONETIZATION_POTENTIAL
 
     conflicts: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
@@ -186,9 +206,18 @@ class Score:
                 + self.evidence.ratio("affiliate_fit")) / 2
 
     @property
+    def route_available(self) -> bool:
+        """今すぐ換金できるか。表示と後方互換のための派生値。"""
+        return self.monetization_readiness == MONETIZATION_IMMEDIATE
+
+    @property
     def production_fit(self) -> float:
-        """既存の制作パイプラインとの相性。換金経路の有無は実測。"""
-        route = 1.0 if self.route_available else (0.2 if self.route_available is False else 0.6)
+        """既存の制作パイプラインとの相性。換金の準備度は実測。
+
+        `none` でも 0 にはしない。「案件が無い」は「金にならない」ではないため
+        （案件は後から開拓できる）。ただし immediate との差は大きく付ける。
+        """
+        route = MONETIZATION_WEIGHT.get(self.monetization_readiness, 0.6)
         return (self.evidence.ratio("contentability")
                 + self.evidence.ratio("durability") + route) / 3
 
@@ -205,14 +234,23 @@ class Score:
 
     @property
     def speculative(self) -> bool:
-        """スコアは高いが根拠が薄い状態。explore 枠で優先的に試す対象。"""
-        return self.opportunity >= 30 and self.confidence < 0.45
+        """スコアは高いが根拠が薄い状態。explore 枠で優先的に試す対象。
+
+        しきい値（30 / 0.45）は**未校正の探索仮説**。`SPECULATIVE_RULE_VERSION` を
+        Ledger に記録してあるので、実績が溜まったら percentile や Pareto frontier に
+        差し替えられる。現時点で固定値なのは、根拠が無いのに複雑にしないため。
+        """
+        return (self.opportunity >= SPECULATIVE_MIN_OPPORTUNITY
+                and self.confidence < SPECULATIVE_MAX_CONFIDENCE)
 
     def to_dict(self) -> dict:
         d = {k: getattr(self, k) for k in RUBRIC}
         d.update(
             llm_verdict=self.llm_verdict, rationale=self.rationale, scored=self.scored,
+            monetization_readiness=self.monetization_readiness,
             route_available=self.route_available,
+            speculative=self.speculative,
+            speculative_rule_version=SPECULATIVE_RULE_VERSION,
             conflicts=self.conflicts, notes=self.notes,
             evidence=self.evidence.to_dict(),
             llm_total=self.llm_total, total=self.total,
