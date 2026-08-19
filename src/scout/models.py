@@ -167,10 +167,18 @@ class Score:
     def discovery(self) -> float:
         """今入り込む余地があるか（0-100）。
 
-        evidence_confidence を掛けているので、根拠が薄い候補は自動的に割り引かれる。
-        実測が1つも無い段階では全候補が等しく割り引かれるため順位は変わらない。
+        **confidence は掛けない。** GPT からの指摘（採用）: 本当に早いトレンドほど
+        ソースが少なく観測回数も少なく SERP も形成されていないので、confidence を
+        スコアに掛けると「早い → 根拠が薄い → 順位が落ちる」となり、
+        成熟したネタを好むシステムになってしまう。早期発見の目的と逆。
+
+        confidence は不確実性として別に持ち、
+          - 表示は「Opportunity 82 / Confidence 0.31」と並べる
+          - `now` 判定のゲートには使う（低確信で自動的に本気の投資はさせない）
+          - explore 枠では「高 opportunity かつ低 confidence」を積極的に選ぶ
+        という使い分けにした。
         """
-        return round(100 * self.momentum * self.whitespace * self.confidence, 1)
+        return round(100 * self.momentum * self.whitespace, 1)
 
     @property
     def monetization(self) -> float:
@@ -194,6 +202,11 @@ class Score:
     def opportunity(self) -> float:
         """最終順位に使うスコア（0-100）。相乗平均なので片方が0なら0。"""
         return round(math.sqrt(max(0.0, self.discovery) * max(0.0, self.business)), 1)
+
+    @property
+    def speculative(self) -> bool:
+        """スコアは高いが根拠が薄い状態。explore 枠で優先的に試す対象。"""
+        return self.opportunity >= 30 and self.confidence < 0.45
 
     def to_dict(self) -> dict:
         d = {k: getattr(self, k) for k in RUBRIC}

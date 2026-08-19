@@ -100,8 +100,26 @@ def test_いいね毎時から成長性が実測される():
     scorer._observe_growth(score, candidate, times_seen=1)
 
     ev = score.evidence.items["trend_growth"]
-    assert ev.observed == RUBRIC["trend_growth"]              # 閾値の4倍で満点
+    assert ev.observed > 5                                    # 推測より高く実測される
     assert ev.source == "x_velocity"
+    assert "log換算" in ev.note
+
+
+def test_成長性の換算は対数で上位を潰さない():
+    """SNS指標は 10/20/40/…/10000 と歪むので線形だと上位が飽和し下位が過大になる。"""
+    scorer = _scorer()
+    points = []
+    for velocity in (2, 10, 50, 500):
+        score = _high_score()
+        scorer._observe_growth(
+            score, Candidate(title="t", source="x_api",
+                             signals={"likes_per_hour": float(velocity)}), times_seen=1)
+        points.append(score.evidence.value("trend_growth"))
+
+    assert points == sorted(points)                # 単調増加
+    assert points[0] < points[1] < points[2]       # 低〜中域で差がつく
+    # 対数なので 10→50 の伸びより 2→10 の伸びの方が点数差が大きくならない
+    assert (points[1] - points[0]) >= (points[3] - points[2])
 
 
 def test_伸びが遅ければ成長性は低く実測される():
@@ -157,6 +175,46 @@ def test_大きなズレだけが矛盾として記録される():
     assert len(score.conflicts) == 1                          # 差1点の軸は記録しない
     assert "low_competition" in score.conflicts[0]
     assert "過大評価" in score.conflicts[0]
+
+
+# --- confidence の扱い ------------------------------------------------------
+def test_confidenceは順位スコアに掛けない():
+    """早いトレンドほど根拠が薄いので、掛けると成熟したネタを好むシステムになる。"""
+    thin = _high_score()                        # 実測ゼロ = 低 confidence
+    thick = _high_score()
+    for axis, mx in (("low_competition", 15), ("trend_growth", 15)):
+        thick.evidence.observe(axis, mx, thick.evidence.value(axis),
+                               source="test", confidence=0.9)
+
+    assert thick.confidence > thin.confidence
+    assert thin.discovery == thick.discovery    # 順位スコアは confidence に影響されない
+
+
+def test_高スコアで低確信ならexplore候補として印が付く():
+    score = _high_score()
+
+    assert score.confidence < 0.45
+    assert score.speculative is True
+
+
+def test_低確信は今すぐ狙うにはならず様子見になる():
+    """順位には効かせないが、本気で投資する判定にはゲートとして使う。"""
+    score = _high_score(llm_verdict="now")
+
+    verdict = _scorer().decide_verdict(score)
+
+    assert score.total >= 70 and score.opportunity >= 30
+    assert verdict == "watch"
+    assert any("根拠が薄い" in n for n in score.notes)
+
+
+def test_確信が高ければ今すぐ狙うになる():
+    score = _high_score(llm_verdict="now")
+    for axis, mx in RUBRIC.items():
+        score.evidence.observe(axis, mx, score.evidence.value(axis),
+                               source="test", confidence=0.8)
+
+    assert _scorer().decide_verdict(score) == "now"
 
 
 # --- 合成スコア -------------------------------------------------------------

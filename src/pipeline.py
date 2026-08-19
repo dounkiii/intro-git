@@ -267,22 +267,47 @@ def _cmd_run(args) -> None:
     Pipeline().run(limit=args.limit, use_sample=args.sample, open_issue=args.open_issue)
 
 
-def _parse_metrics(text: str) -> dict[str, int]:
-    """`posts=8 impressions=4,000 clicks=20` を dict にする。数値以外は無視する。
+# 位置指定で書いたときの解釈順。個数で意味が決まるので曖昧にならない。
+POSITIONAL_METRICS = {
+    1: ("revenue",),
+    2: ("views", "revenue"),
+    3: ("views", "clicks", "revenue"),
+    4: ("views", "clicks", "conversions", "revenue"),
+}
 
-    スマホから打つので桁区切りのカンマが入ることを想定し、数字の間のカンマだけ落とす
-    （区切り文字としてのカンマは残す）。
+
+def _parse_metrics(text: str) -> dict[str, int]:
+    """実績の入力をパースする。スマホで打てる短さを優先している。
+
+      /m xxx 3200                       → revenue だけ
+      /m xxx 6000 3200                  → views, revenue
+      /m xxx 6000 45 1 3200             → views, clicks, conversions, revenue
+      /m xxx views=6000 revenue=3200    → 名前付き（順不同）
+
+    桁区切りのカンマは落とす。名前付きと位置指定は混在してもよい（名前付きが優先）。
     """
     text = re.sub(r"(?<=\d),(?=\d)", "", text or "")
-    values: dict[str, int] = {}
+    named: dict[str, int] = {}
+    positional: list[int] = []
+
     for token in text.replace(",", " ").split():
         key, sep, raw = token.partition("=")
-        if not sep:
+        if sep:
+            try:
+                named[key.strip().lower()] = int(float(raw))
+            except ValueError:
+                logger.warning("数値として読めない値を無視しました: %s", token)
             continue
         try:
-            values[key.strip().lower()] = int(float(raw))
+            positional.append(int(float(token)))
         except ValueError:
             logger.warning("数値として読めない値を無視しました: %s", token)
+
+    values = dict(zip(POSITIONAL_METRICS.get(len(positional), ()), positional))
+    if positional and len(positional) not in POSITIONAL_METRICS:
+        logger.warning("位置指定は1〜4個までです（%d個を無視）。名前付きで指定してください。",
+                       len(positional))
+    values.update(named)          # 名前付きが位置指定に勝つ
     return values
 
 
@@ -321,6 +346,29 @@ def _cmd_command(args) -> None:
 
 def _cmd_publish(args) -> None:
     Pipeline().publish_approved()
+
+
+def _cmd_remind(args) -> None:
+    """実績が未更新の採用ニッチだけをリマインダー Issue に出す。
+
+    入力を促すが、入力しなくても運用は止まらない（UNKNOWN として記録される）。
+    """
+    from datetime import date
+
+    from .publishers.github_issue import GitHubIssueSurface
+    from .scout import ScoutPipeline
+
+    config = Config.load()
+    body = ScoutPipeline(config).render_metrics_reminder(days=args.days)
+    if not body:
+        print("未更新の採用ニッチはありません。")
+        return
+
+    print(body)
+    if args.open_issue:
+        surface = GitHubIssueSurface(config)
+        surface.label = config.section("scout").get("label", "scout-report")
+        surface.create_issue(f"実績の入力 {date.today().isoformat()}", body)
 
 
 def _cmd_calibrate(args) -> None:
@@ -393,6 +441,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_rep.add_argument("--days", type=int, default=7)
     p_rep.add_argument("--issue-title", default="", help="指定すると Issue として投稿する")
     p_rep.set_defaults(func=_cmd_report)
+
+    p_rem = sub.add_parser("remind", help="実績が未更新の採用ニッチをリマインドする")
+    p_rem.add_argument("--days", type=int, default=7)
+    p_rem.add_argument("--open-issue", action="store_true")
+    p_rem.set_defaults(func=_cmd_remind)
 
     p_cal = sub.add_parser("calibrate", help="予測 vs 実績の対応表を出す")
     p_cal.set_defaults(func=_cmd_calibrate)

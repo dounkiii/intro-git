@@ -69,15 +69,19 @@ scout:
     drop_score: 45            # これ未満は「捨てる」
     now_opportunity: 30       # 「今すぐ狙う」に必要な opportunity スコア
     drop_opportunity: 10      # これ未満は「捨てる」
+    # confidence は順位には掛けない（早いトレンドほど根拠が薄く、掛けると成熟した
+    # ネタを好むシステムになるため）。`now` 判定のゲートとしてのみ使う。
+    now_confidence: 0.45
 
   # 撤退判定。時間ではなく「十分な試行回数」で判定する。
-  # 実績が溜まったら分布を見てここを上げる（現状は保守的な仮の値）。
+  # ここに値を書くとプラットフォーム既定（src/scout/funnel.py の PLATFORM_DEFAULTS）を
+  # 上書きする。自アカウントの実績が10件溜まると、その中央値がさらに優先される。
   funnel:
-    min_posts: 8                    # これだけ投稿したら判定してよい
-    min_impressions: 2000           # またはこれだけインプが出たら
-    min_impressions_per_post: 150   # Stage1: 下回れば「配信されていない」
-    min_engagement_rate: 0.02       # Stage2: 下回れば「見られているが刺さっていない」
-    min_ctr: 0.005                  # Stage3: 下回れば「導線が弱い」
+    min_posts: null                 # null = プラットフォーム既定を使う
+    min_impressions: null
+    min_impressions_per_post: null  # Stage1: 下回れば「配信されていない」
+    min_engagement_rate: null       # Stage2: 下回れば「見られているが刺さっていない」
+    min_ctr: null                   # Stage3: 下回れば「導線が弱い」
     min_conversions: 1              # Stage4: 下回れば「案件が悪い」
 
   # Grok (xAI) 発掘。X 上の空気を読む部分は他モデルで代替しにくいので残している。

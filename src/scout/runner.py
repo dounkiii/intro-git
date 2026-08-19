@@ -85,7 +85,8 @@ class ScoutPipeline:
         # 調査枠を exploit（採用済みニッチの深掘り）と explore（新規開拓）に分ける。
         # 採用ニッチが0件のうちは全枠が explore になるので、初動を邪魔しない。
         adopted_texts = [f"{n.label} {n.query}" for n in self.niches.load() if n.active]
-        selected = allocate(fresh, adopted_texts, self.research_limit, self.explore_ratio)
+        selected = allocate(fresh, adopted_texts, self.research_limit,
+                            self.explore_ratio, winners=self._winner_count())
 
         opportunities: list[Opportunity] = []
         for candidate, times_seen in selected:
@@ -104,11 +105,28 @@ class ScoutPipeline:
         # 「捨てる」判定は提示しない（毎日同じゴミを見せないため）
         shown = [o for o in opportunities if o.verdict != "drop"]
         ranked = self.scorer.rank(shown)
-        report = render_daily_report(ranked, self.top_n, scanned=len(opportunities))
+
+        # explore 枠に相当する「高スコアだが根拠が薄い」候補は、埋もれさせずに
+        # 上位へ1件だけ繰り上げる。確信が高いものだけ試していると学習が進まない。
+        speculative = next((o for o in ranked[self.top_n:] if o.score.speculative), None)
+        if speculative and len(ranked) > self.top_n:
+            ranked.remove(speculative)
+            ranked.insert(min(self.top_n - 1, len(ranked)), speculative)
+            logger.info("探索候補を繰り上げました: %s (opportunity=%s, confidence=%s)",
+                        speculative.id, speculative.score.opportunity,
+                        speculative.score.confidence)
+
+        return_value = ranked
+        report = render_daily_report(return_value, self.top_n, scanned=len(opportunities))
 
         if open_issue:
-            self._open_issue(report, len(ranked))
-        return ranked, report
+            self._open_issue(report, len(return_value))
+        return return_value, report
+
+    def _winner_count(self) -> int:
+        """実際に収益が出た採用ニッチの数。explore 枠の比率を決めるのに使う。"""
+        return len({r["niche_slug"] for r in self.ledger.rows("outcome")
+                    if int(r.get("metrics", {}).get("revenue_jpy", 0)) > 0})
 
     # ------------------------------------------------------------------
     def adopt(self, opportunity_id: str) -> str:
@@ -146,51 +164,103 @@ class ScoutPipeline:
         return f"🗑 `{opportunity_id}` を捨てました。今後は再提示されません。"
 
     # ------------------------------------------------------------------
-    def record_metrics(self, niche_slug: str, values: dict[str, int]) -> str:
-        """`/metrics` から実績を記録し、ファネル段階を診断して返す。
+    def record_metrics(self, niche_slug: str, values: dict[str, int],
+                       platform: str = "") -> str:
+        """`/m` から実績を記録し、ファネル段階を診断して返す。
 
-        インプ・CTR・CV は各プラットフォームと ASP の管理画面にしか無く、API 連携は
-        審査が重い。まずは週1回スマホから手入力する形で、Stage の切り分けだけ先に
-        できるようにしている。
+        入力を極限まで減らす方針（GPT提案⑨を採用）:
+          - `posts` は自前のログから自動で埋める。人間に数えさせない
+          - 必須は Core（views / revenue）だけ。1つも無くても Stage 0 で前に進む
+          - 累計値で受け取り、前回からの差分はこちらで計算する
         """
-        from .funnel import FunnelMetrics
+        from .funnel import DEFAULT_PLATFORM, FunnelMetrics
 
         known = {n.slug for n in self.niches.load()}
         if niche_slug not in known:
             return (f"⚠️ `{niche_slug}` は採用済みニッチにありません。"
                     f"候補: {', '.join(sorted(known)) or '（なし）'}")
 
+        posts = values.get("posts") or self._published_count(niche_slug)
+        impressions = values.get("views", values.get("impressions"))
+
         metrics = FunnelMetrics(
             niche=niche_slug,
-            posts=values.get("posts", 0),
-            impressions=values.get("impressions", 0),
-            engaged=values.get("engaged", values.get("views", 0)),
-            cta_clicks=values.get("clicks", values.get("cta_clicks", 0)),
-            conversions=values.get("conversions", values.get("cv", 0)),
+            platform=platform or values.get("platform") or DEFAULT_PLATFORM,
+            posts=posts,
+            impressions=impressions,
             revenue_jpy=values.get("revenue", 0),
+            engaged=values.get("engaged"),
+            cta_clicks=values.get("clicks", values.get("cta_clicks")),
+            conversions=values.get("conversions", values.get("cv")),
             attention_minutes=self.ledger.attention_minutes(niche_slug),
             api_cost_jpy=values.get("cost", 0),
         )
         outcome = self.ledger.record_outcome(metrics)
         self.ledger.record_attention("metrics", niche_slug)
+        verdict = self.ledger.diagnoser_for(metrics).diagnose(metrics)
+        m = verdict.metrics
 
-        verdict = self.ledger.diagnoser.diagnose(metrics)
         lines = [
-            f"📊 `{niche_slug}` の実績を記録しました。",
+            f"📊 `{niche_slug}` の実績を記録しました"
+            + (f"（投稿数は自動入力: {posts}本）。" if posts else "（投稿数は未取得）。"),
             "",
             f"**Stage {outcome.stage}: {outcome.stage_label}**",
             f"→ {verdict.prescription}",
             "",
-            f"- 判定可能か: {'はい' if verdict.decided else 'いいえ（試行回数が不足）'}",
             f"- {verdict.reason}",
-            f"- 1投稿あたりインプ: {verdict.metrics['impressions_per_post']:.0f}",
-            f"- 反応率: {verdict.metrics['engagement_rate']:.2%} / "
-            f"CTR: {verdict.metrics['ctr']:.2%} / CVR: {verdict.metrics['cvr']:.1%}",
-            f"- RPM: {verdict.metrics['rpm']:.0f}円 / EPC: {verdict.metrics['epc']:.0f}円",
-            f"- 判断1分あたり収益: {verdict.metrics['revenue_per_attention_minute']:.0f}円/分",
         ]
+        if outcome.delta:
+            lines.append("- 前回からの増分: "
+                         + " / ".join(f"{k} {v:+,}" for k, v in outcome.delta.items()))
+        if posts:
+            lines.append(f"- 1投稿あたりインプ: {m['impressions_per_post']:.0f}"
+                         f"（下限 {m['distribution_floor']:.0f}）")
+
+        optional = [("反応率", m["engagement_rate"], "{:.2%}"),
+                    ("CTR", m["ctr"], "{:.2%}"),
+                    ("CVR", m["cvr"], "{:.1%}"),
+                    ("EPC", m["epc"], "{:.0f}円")]
+        shown = [f"{name}: {fmt.format(v)}" for name, v, fmt in optional if v is not None]
+        lines.append("- " + (" / ".join(shown) if shown else "反応系の指標は未入力（任意）"))
+        lines.append(f"- RPM: {m['rpm']:.0f}円 / 1投稿あたり収益: {m['revenue_per_post']:.0f}円"
+                     f" / 判断1分あたり: {m['revenue_per_attention_minute']:.0f}円")
+
         if verdict.should_exit:
-            lines += ["", f"🛑 **撤退を検討**: `/drop <opportunity_id>` でこのニッチを止められます。"]
+            lines += ["", "🛑 **撤退を検討**: `/drop <opportunity_id>` で止められます。"]
+        elif outcome.stage == 0:
+            lines += ["", "次回は `/m " + niche_slug + " <累計views> <累計revenue>` を入れると"
+                          "段階が診断できます。入れなくても運用は止まりません。"]
+        return "\n".join(lines)
+
+    @staticmethod
+    def _published_count(niche_slug: str) -> int:
+        """自前のログから公開本数を数える。人間に投稿数を入力させないため。"""
+        try:
+            from ..monetize.revenue import RevenueLog
+
+            rows = RevenueLog()._read(RevenueLog().posts_csv)
+            return sum(1 for r in rows
+                       if r.get("category") == niche_slug and r.get("status") == "published")
+        except Exception as exc:
+            logger.debug("公開本数の自動集計をスキップしました: %s", exc)
+            return 0
+
+    def render_metrics_reminder(self, days: int = 7) -> str:
+        """週次リマインダー本文。未更新の採用ニッチだけを、貼り付け可能な形で出す。"""
+        stale = self.ledger.stale_niches(days)
+        if not stale:
+            return ""
+
+        lines = ["実績が未更新の採用ニッチです。**数字を書き換えてコメントするだけ**でよく、"
+                 "入力しなくても運用は止まりません（UNKNOWN として記録されます）。",
+                 "",
+                 "必要なのは累計の `views` と `revenue` の2つだけ。投稿数は自動で入ります。",
+                 ""]
+        for slug, ago in stale:
+            when = f"{ago}日前" if ago >= 0 else "未入力"
+            lines += [f"- `{slug}`（最終更新: {when}）", f"  `/m {slug} 0 0`"]
+        lines += ["", "数字が1つしか分からないときは `/m <niche> <revenue>` でもよい。",
+                  "完璧な台帳より、続く台帳を優先しています。"]
         return "\n".join(lines)
 
     # ------------------------------------------------------------------

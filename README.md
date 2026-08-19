@@ -12,7 +12,7 @@
 |---|---|---|---|
 | **探索** (`src/scout/`) | まだ競合が薄いのに伸び始めたネタを発掘・裏取り・採点 | `/adopt <id>` どのニッチを攻めるか | 週1〜数日に1回 |
 | **制作** (`src/`) | 採用ニッチで台本・記事・動画を生成し投稿 | `/approve <id>` 出すか出さないか | 毎日3〜5分 |
-| **検証** (`src/scout/ledger.py`) | 予測を凍結し、実績と突き合わせて配点を校正 | `/metrics <niche> ...` 実績の入力 | 週1回30秒 |
+| **検証** (`src/scout/ledger.py`) | 予測を凍結し、実績と突き合わせて配点を校正 | `/m <niche> <views> <revenue>` | 週1回30秒 |
 
 📘 **戦略**: [docs/PLAYBOOK.md](docs/PLAYBOOK.md)（収益条件の実数・90日プラン・地雷リスト）
 🔎 **探索レイヤ設計**: [docs/RESEARCH_SYSTEM.md](docs/RESEARCH_SYSTEM.md)（評価軸・実測補正・データ構造）
@@ -55,9 +55,12 @@
 [即座に] GitHub Actions
   TikTok へ投稿 + 記事を data/articles/ に書き出し + 収益ログに記録
                     ↓
-[週1回] スマホで:  /metrics adopted_xxx posts=12 impressions=6000 clicks=45
+[週1回] スマホで:  /m adopted_xxx 6000 3200      ← 累計views と累計revenue だけ
                     ↓
-        ファネル段階を診断（Stage1 配信されない 〜 Stage5 売れている）
+        投稿数は自動入力。増分は自動計算。1数字だけでも可（/m xxx 3200）
+        入れなくても Stage 0（判定不能）として記録され、運用は止まらない
+                    ↓
+        ファネル段階を診断（Stage0 判定不能 / 1 配信されない 〜 5 売れている）
         「ニッチが悪い」「動画が悪い」「商品が悪い」を切り分ける
                     ↓
 [毎週火曜] 週次レポート Issue
@@ -69,15 +72,20 @@
 **スコアの構造**
 
 ```
-opportunity = √(discovery × business)          ← 最終順位（相乗平均）
+opportunity = √(discovery × business)     ← 最終順位（相乗平均）
+confidence  = 0〜1                        ← 順位には掛けず、別に表示する
 
-discovery = 成長性 × 競合の空き × 根拠の信頼度   「今入り込む余地があるか」
-business  = 需要   × 収益化     × 制作相性       「入って金になるか」
+discovery = 成長性 × 競合の空き            「今入り込む余地があるか」
+business  = 需要 × 収益化 × 制作相性       「入って金になるか」
 ```
 
 片方がゼロに近い候補は上位に来ない。「伸びているが金にならない」も
-「金になるが大手だらけ」も除外される。詳細は
-[docs/RESEARCH_SYSTEM.md](docs/RESEARCH_SYSTEM.md)。
+「金になるが大手だらけ」も除外される。
+
+**確信度はスコアに掛けない。** 本当に早いトレンドほど根拠が薄いので、掛けると
+成熟したネタばかり上位に来てしまう。確信度は表示と `now` 判定のゲートに使い、
+「高スコア × 低確信」は explore 枠として意図的に上位へ繰り上げる。
+詳細は [docs/RESEARCH_SYSTEM.md](docs/RESEARCH_SYSTEM.md)。
 
 **ニッチは「お金・税金・社会保険・給付金」**。高単価アフィリが揃い、制度改正でネタが自動供給され、
 個人を名指ししないので法務リスクが低い。炎上ネタを使わない理由は PLAYBOOK の 3 に書いた。
@@ -144,8 +152,11 @@ python -m src.pipeline command --body "/status"
 # 承認済みを投稿（DRY_RUN=true の間はファイル出力のみ）
 python -m src.pipeline publish --approved
 
-# 実績を入れてファネル段階を診断
-python -m src.pipeline command --body "/metrics adopted_xxx posts=12 impressions=6000 clicks=45"
+# 実績を入れてファネル段階を診断（累計views と累計revenue だけでよい）
+python -m src.pipeline command --body "/m adopted_xxx 6000 3200"
+
+# 未更新の採用ニッチをリマインド
+python -m src.pipeline remind --days 7
 
 # 収益を記録して週次レポート（Experiment Ledger のサマリ付き）を見る
 python -m src.pipeline revenue --amount 3200 --source A8 --note 確定申告ソフト
@@ -166,7 +177,7 @@ python -m src.pipeline calibrate
 | `/revenue <金額> <ASP名> [メモ]` | 収益を記録 |
 | `/adopt <id>` | 探索レイヤのネタを採用 → 翌朝から制作対象になる。**予測が凍結される** |
 | `/drop <id>` | そのネタを捨てる（以後再提示されない） |
-| `/metrics <niche> posts=12 impressions=6000 clicks=45 conversions=1 revenue=3200` | 実績を記録してファネル段階を診断 |
+| `/m <niche> <累計views> <累計revenue>` | 実績を記録してファネル段階を診断（`/metrics` も同じ）。投稿数は自動、1数字だけでも可 |
 
 `approval-queue` / `scout-report` ラベルの付いた Issue で、
 リポジトリのオーナー/メンバーのコメントのみ受け付ける。
@@ -204,6 +215,7 @@ docs/
 .github/workflows/
   daily-scout.yml      毎朝の探索 → リサーチ結果 Issue 作成
   daily-generate.yml   毎朝の生成 → 承認 Issue 作成
+  weekly-metrics.yml   週1回、実績が未更新の採用ニッチをリマインド
   approve-command.yml  /approve コメントで起動 → 投稿
   weekly-report.yml    週次レポート Issue
   tests.yml            pytest

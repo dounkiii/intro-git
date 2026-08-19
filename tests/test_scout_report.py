@@ -30,8 +30,8 @@ def test_1位の見出しと必要項目が出る():
     report = render_daily_report([_opportunity("abc", "インボイス需要", demand=18)], top_n=3)
 
     for expected in ("今日の1位", "インボイス需要", "なぜ今なのか", "想定ユーザー",
-                     "収益化方法", "リスク", "機会スコア", "発見スコア", "収益スコア",
-                     "実測で埋まった軸", "今やるべきアクション", "/adopt abc"):
+                     "収益化方法", "リスク", "機会スコア", "確信度", "発見スコア",
+                     "収益スコア", "実測で埋まった軸", "今やるべきアクション", "/adopt abc"):
         assert expected in report
 
 
@@ -50,6 +50,19 @@ def test_未採点は警告が出る():
     o.score.scored = False
 
     assert "未採点" in render_daily_report([o], top_n=1)
+
+
+def test_確信度が低い候補には探索向きの印が付く():
+    """確信度は順位に効かせないので、代わりに explore 向きだと明示する。"""
+    o = _opportunity("abc", "ネタ", demand=20, low_competition=15, trend_growth=15,
+                     monetizability=20, affiliate_fit=10, contentability=10, durability=5)
+    o.score.route_available = True
+
+    report = render_daily_report([o], top_n=1)
+
+    assert o.score.speculative is True
+    assert "explore 向き" in report
+    assert "確信度はスコアに掛けていません" in report
 
 
 def test_換金経路がなければ警告が出る():

@@ -1,0 +1,45 @@
+# 実績入力のリマインダー。
+#
+# 設計の要点は「入力を促すが、入力しなくても止まらない」こと。
+# 未更新の採用ニッチだけを、そのまま数字を書き換えてコメントできる形で出す。
+# 入力が無ければ UNKNOWN として記録され、パイプラインは通常どおり動き続ける。
+name: weekly-metrics
+
+on:
+  schedule:
+    # 日曜 23:00 UTC = 月曜 08:00 JST（週明けの通勤時間に届く）
+    - cron: '0 23 * * 0'
+  workflow_dispatch:
+    inputs:
+      days:
+        description: '何日以上更新がないものを対象にするか'
+        required: false
+        default: '7'
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: 依存をインストール
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 未更新の採用ニッチをリマインド
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          python -m src.pipeline remind \
+            --days "${{ inputs.days || '7' }}" --open-issue

@@ -111,3 +111,73 @@ def test_予測と実績が対応した行だけ校正表に出る(tmp_path):
     assert [r["niche"] for r in table] == ["niche_with"]
     assert table[0]["actual_rpm"] == 640.0
     assert table[0]["actual_stage"] == 5
+
+
+# --- 最重要KPI ---------------------------------------------------------------
+def test_初売上までの採用件数を数える(tmp_path):
+    ledger = ExperimentLedger(tmp_path)
+    ledger.record_prediction(_opportunity("a"), "niche_a")
+    ledger.record_prediction(_opportunity("b"), "niche_b")
+    ledger.record_prediction(_opportunity("c"), "niche_c")
+    ledger.record_outcome(FunnelMetrics("niche_b", posts=5, impressions=3000,
+                                        revenue_jpy=3200))
+
+    first, total = ledger.adoptions_to_first_revenue()
+
+    assert (first, total) == (2, 3)          # 2件目で初売上
+
+
+def test_初売上前は未達として扱う(tmp_path):
+    ledger = ExperimentLedger(tmp_path)
+    ledger.record_prediction(_opportunity("a"), "niche_a")
+    ledger.record_outcome(FunnelMetrics("niche_a", posts=5, impressions=3000))
+
+    first, total = ledger.adoptions_to_first_revenue()
+
+    assert first is None and total == 1
+    assert "未達" in ledger.render_report()
+
+
+def test_公開到達率が出る(tmp_path):
+    """採用しても公開に至っていなければ、下流のスコア精度に意味がない。"""
+    ledger = ExperimentLedger(tmp_path)
+    ledger.record_prediction(_opportunity("a"), "niche_a")
+    ledger.record_prediction(_opportunity("b"), "niche_b")
+    ledger.record_outcome(FunnelMetrics("niche_a", posts=5, impressions=3000))
+    ledger.record_outcome(FunnelMetrics("niche_b", posts=0))
+
+    assert ledger.publish_rate() == (1, 2)
+
+
+def test_累計入力から増分が計算される(tmp_path):
+    """人間に引き算をさせない。"""
+    ledger = ExperimentLedger(tmp_path)
+    ledger.record_outcome(FunnelMetrics("n", posts=5, impressions=2000, revenue_jpy=0))
+
+    outcome = ledger.record_outcome(
+        FunnelMetrics("n", posts=12, impressions=6000, revenue_jpy=3200))
+
+    assert outcome.delta == {"posts": 7, "impressions": 4000, "revenue_jpy": 3200}
+
+
+def test_未更新のニッチが列挙される(tmp_path):
+    ledger = ExperimentLedger(tmp_path)
+    ledger.record_prediction(_opportunity("a"), "niche_a")
+    ledger.record_prediction(_opportunity("b"), "niche_b")
+    ledger.record_outcome(FunnelMetrics("niche_a", posts=5, impressions=3000))
+
+    stale = ledger.stale_niches(days=0)
+
+    assert ("niche_b", -1) in stale          # 一度も入力されていない
+
+
+def test_自アカウントの分布が判定器に渡される(tmp_path):
+    ledger = ExperimentLedger(tmp_path)
+    for _ in range(12):
+        ledger.record_outcome(FunnelMetrics("n", platform="tiktok", posts=10,
+                                            impressions=10000))
+
+    diagnoser = ledger.diagnoser_for(FunnelMetrics("n", platform="tiktok"))
+
+    assert diagnoser.baseline == 1000.0
+    assert diagnoser.distribution_floor()[1] == "own_baseline"

@@ -19,6 +19,25 @@ from .models import Candidate, normalize_tokens
 logger = logging.getLogger(__name__)
 
 
+# 実績の状態に応じた explore 枠。固定比率にしない（GPT提案⑤を採用）。
+# 勝ちパターンが無いうちは探索するしかなく、安定収益源ができたら深掘りに寄せる。
+EXPLORE_LADDER = (
+    (0, 1.00),        # winner 0件 → 全部 explore
+    (1, 0.30),        # 初売上が出た → 30%
+    (3, 0.20),        # 勝ちパターンが複数 → 20%
+    (5, 0.15),        # 安定した収益源あり → 15%
+)
+
+
+def explore_ratio_for(winners: int, fallback: float = 0.2) -> float:
+    """勝っているニッチの数から explore 枠の割合を決める。"""
+    ratio = fallback
+    for threshold, value in EXPLORE_LADDER:
+        if winners >= threshold:
+            ratio = value
+    return ratio
+
+
 def split_by_novelty(candidates: list[tuple[Candidate, int]],
                      adopted_texts: list[str]) -> tuple[list, list]:
     """(exploit候補, explore候補) に分ける。
@@ -38,13 +57,18 @@ def split_by_novelty(candidates: list[tuple[Candidate, int]],
 
 
 def allocate(candidates: list[tuple[Candidate, int]], adopted_texts: list[str],
-             total_slots: int, explore_ratio: float = 0.2) -> list[tuple[Candidate, int]]:
+             total_slots: int, explore_ratio: float = 0.2,
+             winners: int | None = None) -> list[tuple[Candidate, int]]:
     """調査枠を exploit / explore に配分して候補を選ぶ。
 
+    `winners`（実際に収益が出たニッチ数）を渡すと、比率を状態から決める。
     枠が埋まらない側の余りはもう一方に回す（枠を守るために調査数を減らさない）。
     """
     if total_slots <= 0:
         return []
+
+    if winners is not None:
+        explore_ratio = explore_ratio_for(winners, explore_ratio)
 
     exploit, explore = split_by_novelty(candidates, adopted_texts)
     if not exploit:

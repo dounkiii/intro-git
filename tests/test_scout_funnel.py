@@ -12,6 +12,32 @@ def _d() -> FunnelDiagnoser:
     return FunnelDiagnoser()
 
 
+def test_指標が未入力ならStage0で前に進める():
+    """views 未入力を「Stage1 = ニッチが悪い」と誤診断すると良いニッチを捨てる。"""
+    verdict = _d().diagnose(FunnelMetrics("n", posts=10, revenue_jpy=3200))
+
+    assert verdict.stage == 0
+    assert verdict.label == "判定不能"
+    assert verdict.should_exit is False
+    assert "3,200円 は記録済み" in verdict.reason
+
+
+def test_収益だけでも記録できる():
+    """完璧な台帳より続く台帳。revenue 1つでも受け付ける。"""
+    m = FunnelMetrics("n", revenue_jpy=3200)
+
+    assert m.has_core is False
+    assert _d().diagnose(m).stage == 0
+
+
+def test_反応系が未入力なら悪いと読み替えない():
+    """取れていないことを『刺さっていない』と解釈すると誤診断になる。"""
+    verdict = _d().diagnose(FunnelMetrics("n", posts=10, impressions=5000))
+
+    assert verdict.stage == 0                    # Stage2 にはしない
+    assert verdict.metrics["engagement_rate"] is None
+
+
 def test_試行回数が足りなければ判定しない():
     """少ない試行で撤退させないための安全装置。"""
     verdict = _d().diagnose(FunnelMetrics("n", posts=2, impressions=100))
@@ -60,6 +86,46 @@ def test_売れていればStage5():
     assert verdict.should_exit is False
 
 
+def test_Coreだけで売上があればStage5と判定できる():
+    """clicks や CV が無くても、売れている事実は判定できる。"""
+    verdict = _d().diagnose(FunnelMetrics("n", posts=10, impressions=5000, revenue_jpy=3200))
+
+    assert verdict.stage == 5
+
+
+# --- プラットフォーム別と自アカウントbaseline ---------------------------------
+def test_プラットフォームごとに配信の下限が変わる():
+    """Shorts はサムネ表示と実視聴の差が大きいので下限が高い。"""
+    tiktok = FunnelDiagnoser(platform="tiktok").distribution_floor()[0]
+    shorts = FunnelDiagnoser(platform="youtube_shorts").distribution_floor()[0]
+    x = FunnelDiagnoser(platform="x").distribution_floor()[0]
+
+    assert tiktok < shorts < x
+
+
+def test_自アカウントの実績が世間の既定値より優先される():
+    d = FunnelDiagnoser(baseline_samples=[1000.0] * 12)
+
+    floor, basis = d.distribution_floor()
+
+    assert basis == "own_baseline"
+    assert floor == 300.0                        # 中央値の30%
+    assert d.diagnose(FunnelMetrics("n", posts=10, impressions=2000)).stage == 1
+
+
+def test_サンプルが少なければ既定値にフォールバックする():
+    d = FunnelDiagnoser(baseline_samples=[1000.0] * 3)
+
+    assert d.baseline is None
+    assert d.distribution_floor()[1] == "platform_default"
+
+
+def test_設定のnullはプラットフォーム既定を消さない():
+    d = FunnelDiagnoser({"min_posts": None, "min_impressions": None}, platform="x")
+
+    assert d.min_posts == 15                     # x の既定値が残る
+
+
 def test_同じ0円でも露出量で段階が変わる():
     """これが『30日で0円』を使わない理由。"""
     few = _d().diagnose(FunnelMetrics("n", posts=10, impressions=200))
@@ -76,6 +142,7 @@ def test_収益は露出量で正規化される():
 
     assert m.rpm == 640.0                        # 1,000インプあたり
     assert m.epc == 64.0                         # 1クリックあたり
+    assert m.revenue_per_post == 640.0
     assert m.revenue_per_attention_minute == 200.0
 
 

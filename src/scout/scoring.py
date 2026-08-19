@@ -22,6 +22,7 @@ GPT との議論を経て変えた点:
 from __future__ import annotations
 
 import logging
+import math
 
 from ..config import Config
 from ..llm import ClaudeClient
@@ -103,6 +104,9 @@ class Scorer:
         self.drop_score = int(t.get("drop_score", 45))
         self.now_opportunity = float(t.get("now_opportunity", 30))
         self.drop_opportunity = float(t.get("drop_opportunity", 10))
+        # confidence はスコアに掛けないが、`now`（本気で投資する）判定のゲートに使う。
+        # 低確信のものは watch に留め、explore 枠で意図的に試す対象にする。
+        self.now_confidence = float(t.get("now_confidence", 0.45))
         self.serp = SerpAnalyzer(provider=scout.get("serp_provider", "heuristic"))
         self._affiliate = None
 
@@ -182,11 +186,14 @@ class Scorer:
         if candidate.source != "x_api" or velocity <= 0:
             return
 
-        # 閾値の 4 倍で満点になる線形換算。この換算自体が仮説なので mapping_version を持つ。
-        ceiling = self.min_likes_per_hour * 4
-        ratio = min(1.0, velocity / ceiling) if ceiling else 0.0
+        # 対数換算。GPT からの指摘（採用）: SNS 指標の分布は 10/20/40/…/10000 のように
+        # 極端に歪むので線形（閾値の4倍で満点）は上位を潰し下位を過大評価する。
+        # 最終的には同一プラットフォーム・カテゴリ内の percentile にしたいが、
+        # 分布が取れるまでは log で近似する（TODO: 実績30件で percentile に切替）。
+        ceiling = self.min_likes_per_hour * 20      # この付近で満点に漸近
+        ratio = min(1.0, math.log1p(velocity) / math.log1p(ceiling)) if ceiling > 0 else 0.0
         points = round(ratio * RUBRIC["trend_growth"])
-        note = f"likes_per_hour={velocity}"
+        note = f"likes_per_hour={velocity} (log換算)"
 
         # 何度も観測されているのに伸びない = 継続性ではなく陳腐化
         if times_seen >= self.stale_after_seen and velocity < self.min_likes_per_hour * 2:
@@ -249,7 +256,15 @@ class Scorer:
         if score.total < self.drop_score or score.opportunity < self.drop_opportunity:
             machine = "drop"
         elif score.total >= self.now_score and score.opportunity >= self.now_opportunity:
-            machine = "now"
+            # confidence は順位には効かせないが、`now`（本気で投資する）には要求する。
+            # 高スコア・低確信は捨てずに watch へ置き、explore 枠で試す。
+            if score.confidence >= self.now_confidence:
+                machine = "now"
+            else:
+                machine = "watch"
+                score.notes.append(
+                    f"スコアは now 相当だが根拠が薄い（confidence {score.confidence} "
+                    f"< {self.now_confidence}）ため watch。explore 枠での検証向き")
         else:
             machine = "watch"
 
@@ -267,7 +282,10 @@ class Scorer:
 
         discovery だけで並べると「入る余地はあるが金にならない」テーマが上位に来る。
         business だけで並べると「金になるが大手だらけ」のテーマが上位に来る。
-        相乗平均なので、どちらかがゼロに近い候補は上に来ない。
+        相乗平均なので、どちらかがゼロに 近い候補は上に来ない。
+
+        confidence は順位に入れない（早いトレンドほど根拠が薄く、掛けると
+        成熟したネタを好むシステムになるため）。不確実性は別に表示する。
         """
         return sorted(
             opportunities,

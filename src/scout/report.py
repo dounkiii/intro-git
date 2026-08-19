@@ -40,9 +40,10 @@ def render_opportunity(opportunity: Opportunity, rank: int) -> str:
         _bullets(r.risks, "特になし"),
         "",
         f"**機会スコア**: {s.opportunity}/100　"
-        f"= √(発見 {s.discovery} × 収益 {s.business})",
-        f"　発見スコア（入る余地）: 成長 {s.momentum:.0%} × 競合の空き {s.whitespace:.0%}"
-        f" × 根拠信頼度 {s.confidence:.0%}",
+        f"**確信度**: {s.confidence:.2f}"
+        + ("　🎲 スコアは高いが根拠が薄い（explore 向き）" if s.speculative else ""),
+        f"　= √(発見 {s.discovery} × 収益 {s.business})",
+        f"　発見スコア（入る余地）: 成長 {s.momentum:.0%} × 競合の空き {s.whitespace:.0%}",
         f"　収益スコア（金になるか）: 需要 {s.evidence.ratio('demand'):.0%}"
         f" × 収益化 {s.monetization:.0%} × 制作相性 {s.production_fit:.0%}"
         f"{'' if s.route_available else '（⚠️ 換金経路なし）'}",
@@ -92,6 +93,10 @@ def render_daily_report(ranked: list[Opportunity], top_n: int = 3,
         "相乗平均なので「入る余地はあるが金にならない」「金になるが大手だらけ」の"
         "どちらも上位に来ません。",
         "",
+        "**確信度はスコアに掛けていません。** 本当に早いトレンドほど根拠が薄いので、"
+        "掛けると成熟したネタばかり上位に来てしまいます。"
+        "🎲 が付いた候補は「スコアは高いが根拠が薄い」= 意図的に試す価値がある枠です。",
+        "",
         "```",
         "/adopt <id>   採用 → 翌朝からこのテーマでコンテンツが生成される",
         "/drop  <id>   捨てる → 今後この候補は再提示されない",
@@ -106,12 +111,12 @@ def render_daily_report(ranked: list[Opportunity], top_n: int = 3,
     rest = ranked[top_n:]
     if rest:
         rows = ["<details><summary>その他の候補（{}件）</summary>".format(len(rest)), "",
-                "| id | ネタ | 機会 | 発見 | 収益 | 実測率 | 判定 |",
+                "| id | ネタ | 機会 | 確信度 | 発見 | 収益 | 判定 |",
                 "|---|---|---|---|---|---|---|"]
         for o in rest[:20]:
             rows.append(f"| `{o.id}` | {o.candidate.title[:40]} | {o.score.opportunity} "
-                        f"| {o.score.discovery} | {o.score.business} "
-                        f"| {o.score.observed_ratio:.0%} | {o.verdict} |")
+                        f"| {o.score.confidence:.2f} | {o.score.discovery} "
+                        f"| {o.score.business} | {o.verdict} |")
         rows += ["", "</details>", ""]
         body.extend(rows)
 

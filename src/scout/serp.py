@@ -50,6 +50,17 @@ OFFICIAL_SUFFIXES = (".go.jp", ".lg.jp", ".ac.jp")
 
 _YEAR_RE = re.compile(r"20\d{2}")
 
+# ページ種別。ホスト名だけで「弱い」と決めつけず、特徴量の1つとして扱う
+# （note でも強い記事はある、という GPT の指摘を反映）。
+PAGE_TYPE_BY_HOST = {"ugc": "qa", "personal": "blog", "strong": "media",
+                     "ec": "product", "official": "official", "unknown": "other"}
+
+# 検索意図が「答えを求めている」ことを示す語。TOP10 のタイトルに
+# これが無く定義・公式・ニュースばかりなら、答えがまだ供給されていない。
+ANSWER_INTENT_WORDS = ("方法", "やり方", "手順", "比較", "おすすめ", "選び方", "いくら",
+                       "違い", "対策", "コツ", "注意点", "デメリット", "できない", "安く")
+DEFINITIONAL_WORDS = ("とは", "意味", "公式", "ニュース", "速報", "概要", "一覧")
+
 
 def classify_host(url: str) -> str:
     """URL をドメイン種別に分類する。"""
@@ -78,6 +89,11 @@ class SerpWeakness:
     breakdown: dict[str, float] = field(default_factory=dict)
     intent_match_ratio: float = 0.0    # 上位タイトルが検索意図に一致している率
     stale_ratio: float = 0.0           # 古い年号が入っている率
+    # --- GPT 提案で追加した特徴量 ---
+    fragmentation: float = 0.0         # A: 上位のページ種別がバラけている度合い
+    concentration: float = 0.0         # B: 同一ドメインが枠を占めている度合い
+    answer_coverage: float = 0.0       # D: 答えを示すタイトルの割合
+    features: dict[str, float] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -85,7 +101,9 @@ class SerpWeakness:
             "weakness": self.weakness, "confidence": self.confidence,
             "provider": self.provider, "sampled": self.sampled,
             "breakdown": self.breakdown, "intent_match_ratio": self.intent_match_ratio,
-            "stale_ratio": self.stale_ratio, "notes": self.notes,
+            "stale_ratio": self.stale_ratio, "fragmentation": self.fragmentation,
+            "concentration": self.concentration, "answer_coverage": self.answer_coverage,
+            "features": self.features, "notes": self.notes,
         }
 
 
@@ -127,20 +145,84 @@ class SerpAnalyzer:
 
         intent = self._intent_match(results, keywords)
         stale = self._stale_ratio(results)
+        fragmentation = self._fragmentation(urls)
+        concentration = self._concentration(urls)
+        answer_coverage = self._answer_coverage(results)
 
-        # 上位が検索意図にぴったり合っている = 競合が本気で狙っている → 守備力が高い
-        if intent >= 0.6:
-            weakness = max(0, weakness - 15)
-        # 古い記事ばかり = 更新されていない → 参入余地
-        if stale >= 0.4:
-            weakness = min(100, weakness + 10)
+        adjustments: list[tuple[float, str]] = [
+            # 上位が検索意図にぴったり合っている = 競合が本気で狙っている
+            (-15 if intent >= 0.6 else 0, "上位タイトルが検索意図に一致"),
+            # 古い記事ばかり = 更新されていない
+            (10 if stale >= 0.4 else 0, "上位に古い年号が多い"),
+            # A: 解説/商品/掲示板/ニュースが混在 = Google も決定版を持っていない
+            (12 if fragmentation >= 0.6 else 0, "上位のページ種別がバラけている"),
+            # D: 答えを示すタイトルが無く定義・公式ばかり = 答えが供給されていない
+            (12 if answer_coverage <= 0.2 else 0, "答えを示すタイトルが少ない"),
+            # B: 同一ドメイン独占。強者独占とも「他に無い」とも読めるので補助扱いで小さく
+            (-5 if concentration >= 0.4 else 0, "同一ドメインが枠を占めている"),
+        ]
+        for delta, label in adjustments:
+            if delta:
+                weakness = max(0, min(100, weakness + delta))
 
         confidence, notes = self._confidence(n, share)
+        notes += [f"{label}（{delta:+.0f}）" for delta, label in adjustments if delta]
+
         return SerpWeakness(
             weakness=weakness, confidence=confidence, provider="heuristic",
             sampled=n, breakdown=share, intent_match_ratio=intent,
-            stale_ratio=stale, notes=notes,
+            stale_ratio=stale, fragmentation=fragmentation,
+            concentration=concentration, answer_coverage=answer_coverage,
+            features={"intent_match": intent, "stale": stale,
+                      "fragmentation": fragmentation, "concentration": concentration,
+                      "answer_coverage": answer_coverage},
+            notes=notes,
         )
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _fragmentation(urls: list[str]) -> float:
+        """A: 上位のページ種別がどれだけバラけているか（0-1）。
+
+        解説・商品ページ・掲示板・ニュース・PDF が混在しているなら、Google 自身が
+        「このクエリの決定版をまだ持っていない」状態の可能性がある。
+        逆に全部「おすすめ10選」なら成熟している。
+        """
+        if len(urls) < 3:
+            return 0.0
+        types = [PAGE_TYPE_BY_HOST[classify_host(u)] for u in urls]
+        return round(len(set(types)) / min(len(types), len(set(PAGE_TYPE_BY_HOST.values()))), 3)
+
+    @staticmethod
+    def _concentration(urls: list[str]) -> float:
+        """B: 同一ドメインが最大何割の枠を取っているか（0-1）。補助特徴量。
+
+        強者独占とも「意図を満たすサイトが少なすぎて同じサイトが何度も出ている」とも
+        読めるので、単独では使わず小さい補正に留める。
+        """
+        if not urls:
+            return 0.0
+        counts: dict[str, int] = {}
+        for u in urls:
+            host = urlparse(u).netloc.lower().removeprefix("www.")
+            counts[host] = counts.get(host, 0) + 1
+        return round(max(counts.values()) / len(urls), 3)
+
+    @staticmethod
+    def _answer_coverage(results: list[dict]) -> float:
+        """D: 「答え」を示すタイトルの割合（0-1）。
+
+        検索意図が「安くする方法」なのに上位が「〜とは」「〜公式」「〜ニュース」
+        ばかりなら参入余地が大きい。
+        """
+        titles = [(r.get("title") or "") for r in results if r.get("title")]
+        if not titles:
+            return 0.0
+        answers = sum(1 for t in titles if any(w in t for w in ANSWER_INTENT_WORDS))
+        definitional = sum(1 for t in titles if any(w in t for w in DEFINITIONAL_WORDS))
+        if answers == 0 and definitional == 0:
+            return 0.0
+        return round(answers / len(titles), 3)
 
     def _confidence(self, n: int, share: dict[str, float]) -> tuple[float, list[str]]:
         """代理指標なので信頼度は低く抑える。実測を騙らないことが重要。"""
@@ -183,7 +265,8 @@ class SerpAnalyzer:
 def weakness_to_points(weakness: int, max_points: int) -> int:
     """SERP 守備力 → 「競合の少なさ」の点数。
 
-    この換算は人間が置いた仮説である。Experiment Ledger に mapping_version と
-    一緒に記録し、実績が溜まってから校正する（先に正解を考えすぎない）。
+    weakness は既に 0-100 に正規化された複合指標なので、換算は線形のままにする
+    （複雑にせず、実績が溜まってから校正する）。いいね/時間のような素の SNS 指標は
+    分布が歪むので log 変換しているが、こちらは合成済みなので線形でよい。
     """
     return round(weakness / 100 * max_points)

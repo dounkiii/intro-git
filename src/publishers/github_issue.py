@@ -10,8 +10,9 @@
   /revenue <金額> <ASP名> [メモ]  収益を記録
   /adopt   <opportunity_id>   探索レイヤのネタを採用して制作を始める
   /drop    <opportunity_id>   そのネタを捨てる
-  /metrics <niche> posts=8 impressions=4000 clicks=20 conversions=1 revenue=3200
-                              実績を記録してファネル段階を診断する
+  /m <niche> <累計views> <累計revenue>
+                              実績を記録してファネル段階を診断する（/metrics も同じ）
+                              投稿数は自動。1つだけなら `/m <niche> <revenue>` でよい
 
 `GITHUB_TOKEN` が無い環境（ローカル）では API を呼ばず Markdown を返すだけ。
 """
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 API_ROOT = "https://api.github.com"
 COMMAND_RE = re.compile(
-    r"^\s*/(approve|reject|status|revenue|adopt|drop|metrics)\b[ \t]*(.*)$",
+    r"^\s*/(approve|reject|status|revenue|adopt|drop|metrics|m)\b[ \t]*(.*)$",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -48,7 +49,7 @@ def parse_commands(comment_body: str) -> list[Command]:
     """コメント本文からコマンドを抽出する。1コメントに複数行書いても全部拾う。"""
     commands: list[Command] = []
     for action, rest in COMMAND_RE.findall(comment_body or ""):
-        action = action.lower()
+        action = "metrics" if action.lower() == "m" else action.lower()
         rest = rest.strip()
         if action == "status":
             commands.append(Command(action="status"))

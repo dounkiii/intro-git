@@ -77,7 +77,9 @@ class Outcome:
     kind: str = "outcome"
     ts: str = ""
     niche_slug: str = ""
+    platform: str = ""
     metrics: dict = field(default_factory=dict)
+    delta: dict = field(default_factory=dict)   # 前回からの増分（入力は累計値で受ける）
     stage: int = 0
     stage_label: str = ""
     decided: bool = False
@@ -107,6 +109,7 @@ class ExperimentLedger:
         self.dir = directory
         self.dir.mkdir(parents=True, exist_ok=True)
         self.path = self.dir / "ledger.jsonl"
+        self.funnel_thresholds = funnel_thresholds
         self.diagnoser = FunnelDiagnoser(funnel_thresholds)
 
     # ------------------------------------------------------------------
@@ -160,15 +163,54 @@ class ExperimentLedger:
         return prediction
 
     def record_outcome(self, metrics: FunnelMetrics, note: str = "") -> Outcome:
-        """実績を追記し、ファネル段階を判定する。"""
-        verdict = self.diagnoser.diagnose(metrics)
+        """実績を追記し、ファネル段階を判定する。
+
+        入力は累計値で受け取り、前回との差分をこちらで計算する（人間に引き算をさせない）。
+        """
+        verdict = self.diagnoser_for(metrics).diagnose(metrics)
         outcome = Outcome(
-            ts=_now(), niche_slug=metrics.niche, metrics=metrics.to_dict(),
+            ts=_now(), niche_slug=metrics.niche, platform=metrics.platform,
+            metrics=metrics.to_dict(), delta=self._delta(metrics),
             stage=verdict.stage, stage_label=verdict.label,
             decided=verdict.decided, note=note or verdict.prescription,
         )
         self._append(outcome.to_dict())
         return outcome
+
+    def diagnoser_for(self, metrics: FunnelMetrics) -> FunnelDiagnoser:
+        """プラットフォームと自アカウントの実績分布に合わせた判定器を返す。"""
+        return FunnelDiagnoser(
+            self.funnel_thresholds, platform=metrics.platform,
+            baseline_samples=self.baseline_samples(metrics.platform),
+        )
+
+    def baseline_samples(self, platform: str = "") -> list[float]:
+        """自アカウントの「1投稿あたりインプ」の実績列。判定の基準に使う。"""
+        samples: list[float] = []
+        for row in self.rows("outcome"):
+            if platform and row.get("platform") and row["platform"] != platform:
+                continue
+            per_post = row.get("metrics", {}).get("impressions_per_post")
+            if per_post is None:
+                m = row.get("metrics", {})
+                posts, impressions = m.get("posts") or 0, m.get("impressions")
+                per_post = (impressions / posts) if posts and impressions else 0
+            if per_post:
+                samples.append(float(per_post))
+        return samples
+
+    def _delta(self, metrics: FunnelMetrics) -> dict:
+        previous = self.latest_outcome(metrics.niche)
+        if not previous:
+            return {}
+        before = previous.get("metrics", {})
+        delta: dict[str, int] = {}
+        for key in ("posts", "impressions", "revenue_jpy", "cta_clicks", "conversions"):
+            now_v, before_v = getattr(metrics, key, None), before.get(key)
+            if now_v is None or before_v is None:
+                continue
+            delta[key] = int(now_v) - int(before_v)
+        return delta
 
     def record_attention(self, action: str, niche_slug: str = "",
                          seconds: int | None = None) -> None:
@@ -189,6 +231,68 @@ class ExperimentLedger:
             rows = [r for r in rows if r.get("niche_slug") == niche_slug]
         return round(sum(int(r.get("seconds", 0)) for r in rows) / 60, 1)
 
+    # --- 最重要KPI ---------------------------------------------------
+    def adoptions_to_first_revenue(self) -> tuple[int | None, int]:
+        """(初売上までに要した採用件数, 現在の採用件数)。
+
+        GPT の提案（採用）: このプロジェクトで当面追う数字を1つ選ぶならこれ。
+        3件で初売上なら探索が効いている。40件で0円なら探索・production_fit・
+        案件選定のどこかが根本的に間違っている。
+        """
+        predictions = sorted(self.rows("prediction"), key=lambda r: r.get("ts", ""))
+        earning = {r["niche_slug"] for r in self.rows("outcome")
+                   if int(r.get("metrics", {}).get("revenue_jpy", 0)) > 0}
+        for i, p in enumerate(predictions, start=1):
+            if p.get("niche_slug") in earning:
+                return i, len(predictions)
+        return None, len(predictions)
+
+    def publish_rate(self) -> tuple[int, int]:
+        """(1本以上公開できた採用ニッチ数, 採用ニッチ数)。
+
+        初売上までの採用件数は一度しか観測できない遅行指標なので、毎週見られる
+        先行指標としてこれを並べる。採用しても公開に至っていなければ、
+        下流のスコア精度をいくら上げても意味がない。
+        """
+        adopted = {r["niche_slug"] for r in self.rows("prediction")}
+        published = {r["niche_slug"] for r in self.rows("outcome")
+                     if int(r.get("metrics", {}).get("posts", 0)) > 0}
+        return len(adopted & published), len(adopted)
+
+    def stale_niches(self, days: int = 7) -> list[tuple[str, int]]:
+        """実績が更新されていない採用ニッチ。週次リマインダー Issue に使う。
+
+        戻り値は (niche_slug, 最終更新からの日数)。未更新は日数 -1。
+        """
+        from datetime import timedelta
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        latest: dict[str, datetime] = {}
+        for row in self.rows("outcome"):
+            ts = self._parse_ts(row.get("ts", ""))
+            slug = row.get("niche_slug", "")
+            if ts and (slug not in latest or ts > latest[slug]):
+                latest[slug] = ts
+
+        stale: list[tuple[str, int]] = []
+        for row in self.rows("prediction"):
+            slug = row.get("niche_slug", "")
+            if not slug:
+                continue
+            seen = latest.get(slug)
+            if seen is None:
+                stale.append((slug, -1))
+            elif seen < cutoff:
+                stale.append((slug, (datetime.now(timezone.utc) - seen).days))
+        return sorted(set(stale), key=lambda x: -x[1])
+
+    @staticmethod
+    def _parse_ts(value: str) -> datetime | None:
+        try:
+            return datetime.fromisoformat(value)
+        except (ValueError, TypeError):
+            return None
+
     def render_report(self) -> str:
         """台帳サマリ。週次レポートに載せる。"""
         predictions = self.rows("prediction")
@@ -196,8 +300,29 @@ class ExperimentLedger:
         total_attention = self.attention_minutes()
         revenue = sum(int(r.get("metrics", {}).get("revenue_jpy", 0)) for r in outcomes)
 
+        first, adopted = self.adoptions_to_first_revenue()
+        published, adopted_total = self.publish_rate()
+
         lines = [
             "## Experiment Ledger",
+            "",
+            "### 最重要KPI",
+            "",
+        ]
+        if first is not None:
+            lines.append(f"- 🎉 **初売上までの採用件数: {first}件**（探索が効いている）")
+        else:
+            lines.append(f"- **初売上までの採用件数: 未達（現在 {adopted}件）**"
+                         + ("　⚠️ 20件を超えても0円なら探索・換金経路・案件選定のどこかが"
+                            "根本的に間違っている" if adopted >= 20 else ""))
+        rate = f"{published}/{adopted_total}" if adopted_total else "0/0"
+        lines.append(f"- 公開到達率: **{rate}**"
+                     + ("　⚠️ 採用しても公開に至っていない。下流のスコア精度より先にここ"
+                        if adopted_total and published < adopted_total / 2 else ""))
+
+        lines += [
+            "",
+            "### 台帳",
             "",
             f"- 採用したテーマ: **{len(predictions)}件**（校正開始まで残り "
             f"{max(0, CALIBRATION_MIN_ROWS - len(predictions))}件）",
@@ -207,6 +332,12 @@ class ExperimentLedger:
         if total_attention:
             lines.append(f"- **判断1分あたり収益: {round(revenue / total_attention, 1)}円/分**"
                          "（これが最終的な目的関数の実測値）")
+
+        stale = self.stale_niches()
+        if stale:
+            names = ", ".join(f"`{s}`" + (f"（{d}日前）" if d >= 0 else "（未入力）")
+                              for s, d in stale[:8])
+            lines.append(f"- 実績が未更新: {names}")
 
         stuck: dict[int, list[str]] = {}
         for row in outcomes:
