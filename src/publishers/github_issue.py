@@ -10,6 +10,8 @@
   /revenue <金額> <ASP名> [メモ]  収益を記録
   /adopt   <opportunity_id>   探索レイヤのネタを採用して制作を始める
   /drop    <opportunity_id>   そのネタを捨てる
+  /metrics <niche> posts=8 impressions=4000 clicks=20 conversions=1 revenue=3200
+                              実績を記録してファネル段階を診断する
 
 `GITHUB_TOKEN` が無い環境（ローカル）では API を呼ばず Markdown を返すだけ。
 """
@@ -28,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 API_ROOT = "https://api.github.com"
 COMMAND_RE = re.compile(
-    r"^\s*/(approve|reject|status|revenue|adopt|drop)\b[ \t]*(.*)$",
+    r"^\s*/(approve|reject|status|revenue|adopt|drop|metrics)\b[ \t]*(.*)$",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -37,7 +39,7 @@ COMMAND_RE = re.compile(
 class Command:
     """コメントから抽出した 1 コマンド。"""
 
-    action: str            # approve | reject | status | revenue | adopt | drop
+    action: str            # approve | reject | status | revenue | adopt | drop | metrics
     target: str = ""       # item_id または "all"
     note: str = ""         # 却下理由 / 収益のメモ
 

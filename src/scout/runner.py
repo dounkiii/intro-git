@@ -13,7 +13,8 @@ import logging
 from pathlib import Path
 
 from ..config import Config
-from ..monetize.revenue import RevenueLog
+from .explore import allocate
+from .ledger import ExperimentLedger
 from .models import Candidate, Opportunity
 from .niches import NicheRegistry
 from .report import render_daily_report
@@ -35,16 +36,16 @@ class ScoutPipeline:
         self.research_limit = int(scout.get("research_limit", 6))
         self.top_n = int(scout.get("top_n", 3))
         self.similarity = float(scout.get("dedup_similarity", 0.6))
+        self.explore_ratio = float(scout.get("explore_ratio", 0.2))
 
         self.sources = [XApiSource(self.config), GrokSource(self.config)]
         self.store = OpportunityStore()
         self.niches = NicheRegistry()
         self.researcher = Researcher(self.config)
-        self.scorer = Scorer(
-            self.config,
-            llm=self.researcher.llm,
-            niche_revenue=RevenueLog().revenue_by_token(),
-        )
+        # 収益実績による加点は行わない（勝っている市場ばかり再発見するループを避けるため）。
+        # 実績は explore/exploit の枠配分と Experiment Ledger の側で使う。
+        self.scorer = Scorer(self.config, llm=self.researcher.llm)
+        self.ledger = ExperimentLedger(funnel_thresholds=scout.get("funnel"))
 
     # ------------------------------------------------------------------
     def discover(self, use_sample: bool = False) -> list[Candidate]:
@@ -81,8 +82,13 @@ class ScoutPipeline:
         # 調査はコストがかかるので、伸びの速い順に上位だけ深掘りする
         fresh.sort(key=lambda pair: pair[0].signals.get("likes_per_hour", 0), reverse=True)
 
+        # 調査枠を exploit（採用済みニッチの深掘り）と explore（新規開拓）に分ける。
+        # 採用ニッチが0件のうちは全枠が explore になるので、初動を邪魔しない。
+        adopted_texts = [f"{n.label} {n.query}" for n in self.niches.load() if n.active]
+        selected = allocate(fresh, adopted_texts, self.research_limit, self.explore_ratio)
+
         opportunities: list[Opportunity] = []
-        for candidate, times_seen in fresh[: self.research_limit]:
+        for candidate, times_seen in selected:
             research = self.researcher.investigate(candidate)
             score, action = self.scorer.score(candidate, research, times_seen)
             verdict = self.scorer.decide_verdict(score)
@@ -113,13 +119,22 @@ class ScoutPipeline:
 
         niche = self.niches.adopt(opportunity)
         self.store.set_status(opportunity_id, "adopted")
+
+        # 予測を凍結する。以後書き換えないので、後から「予測が当たったか」を検証できる。
+        self.ledger.record_prediction(opportunity, niche.slug)
+        self.ledger.record_attention("adopt", niche.slug)
+
         return "\n".join([
             f"✅ `{opportunity_id}` を採用しました。",
             f"　ニッチ: `{niche.slug}` — {niche.label}",
             f"　検索クエリ: `{niche.query}`",
             f"　最初に作るもの: {niche.best_product or '（未検討）'}",
+            f"　予測: 機会{opportunity.score.opportunity} "
+            f"(発見{opportunity.score.discovery} / 収益{opportunity.score.business})"
+            f" 実測率{opportunity.score.observed_ratio:.0%}",
             "",
             "翌朝の生成ジョブからこのテーマで台本と記事が作られます。",
+            f"実績は `/metrics {niche.slug} posts=8 impressions=4000 clicks=20` で記録してください。",
         ])
 
     def drop(self, opportunity_id: str) -> str:
@@ -127,7 +142,56 @@ class ScoutPipeline:
             return f"⚠️ `{opportunity_id}` が見つかりません。"
         self.store.set_status(opportunity_id, "dropped")
         self.niches.deactivate(opportunity_id)
+        self.ledger.record_attention("drop", opportunity_id)
         return f"🗑 `{opportunity_id}` を捨てました。今後は再提示されません。"
+
+    # ------------------------------------------------------------------
+    def record_metrics(self, niche_slug: str, values: dict[str, int]) -> str:
+        """`/metrics` から実績を記録し、ファネル段階を診断して返す。
+
+        インプ・CTR・CV は各プラットフォームと ASP の管理画面にしか無く、API 連携は
+        審査が重い。まずは週1回スマホから手入力する形で、Stage の切り分けだけ先に
+        できるようにしている。
+        """
+        from .funnel import FunnelMetrics
+
+        known = {n.slug for n in self.niches.load()}
+        if niche_slug not in known:
+            return (f"⚠️ `{niche_slug}` は採用済みニッチにありません。"
+                    f"候補: {', '.join(sorted(known)) or '（なし）'}")
+
+        metrics = FunnelMetrics(
+            niche=niche_slug,
+            posts=values.get("posts", 0),
+            impressions=values.get("impressions", 0),
+            engaged=values.get("engaged", values.get("views", 0)),
+            cta_clicks=values.get("clicks", values.get("cta_clicks", 0)),
+            conversions=values.get("conversions", values.get("cv", 0)),
+            revenue_jpy=values.get("revenue", 0),
+            attention_minutes=self.ledger.attention_minutes(niche_slug),
+            api_cost_jpy=values.get("cost", 0),
+        )
+        outcome = self.ledger.record_outcome(metrics)
+        self.ledger.record_attention("metrics", niche_slug)
+
+        verdict = self.ledger.diagnoser.diagnose(metrics)
+        lines = [
+            f"📊 `{niche_slug}` の実績を記録しました。",
+            "",
+            f"**Stage {outcome.stage}: {outcome.stage_label}**",
+            f"→ {verdict.prescription}",
+            "",
+            f"- 判定可能か: {'はい' if verdict.decided else 'いいえ（試行回数が不足）'}",
+            f"- {verdict.reason}",
+            f"- 1投稿あたりインプ: {verdict.metrics['impressions_per_post']:.0f}",
+            f"- 反応率: {verdict.metrics['engagement_rate']:.2%} / "
+            f"CTR: {verdict.metrics['ctr']:.2%} / CVR: {verdict.metrics['cvr']:.1%}",
+            f"- RPM: {verdict.metrics['rpm']:.0f}円 / EPC: {verdict.metrics['epc']:.0f}円",
+            f"- 判断1分あたり収益: {verdict.metrics['revenue_per_attention_minute']:.0f}円/分",
+        ]
+        if verdict.should_exit:
+            lines += ["", f"🛑 **撤退を検討**: `/drop <opportunity_id>` でこのニッチを止められます。"]
+        return "\n".join(lines)
 
     # ------------------------------------------------------------------
     def _open_issue(self, report: str, count: int) -> None:

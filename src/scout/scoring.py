@@ -1,20 +1,23 @@
-"""評価（ちゃっぴー案の GPT 担当分）。
+"""評価。LLM の推測を、測れた分だけ実測で置き換える。
 
-ちゃっぴー案は「GPT に 100 点で採点させる」だったが、それだけでは占いになる。
-LLM は「競合の少なさ」を検索せずに推測で答えられてしまうし、自信の度合いも
-スコアに現れない。そこでこのモジュールは 2 段構えにしている。
+GPT との議論を経て変えた点:
+  - 旧: LLM が 15点 → 実測と矛盾したら -10（推測と実測を足し引きしていた）
+  - 新: 実測が取れた軸は **LLM 評価を置き換える**。矛盾は減点ではなくフラグとして残し、
+        後で配点を校正するための教師データにする（src/scout/evidence.py）
 
-  1. LLM に評価軸どおり採点させる（主観）
-  2. 実測シグナルで補正する（客観）
-     - 検索で見えた独立ドメイン数 vs LLM の「競合が少ない」判断 → 矛盾を検出
-     - 根拠 URL が 0 件 → 信頼性を減点
-     - いいね/時間が閾値未満 → 「伸び始めている」の否定
-     - 何日も出続けているのに伸びていない → 継続性ではなく陳腐化として減点
-     - 過去に実際に収益が出たカテゴリ → 加点（成果フィードバック）
+  - 旧: 収益実績のあるキーワードに +5
+  - 新: 削除。勝っている市場ばかり再発見するフィードバックループになるため、
+        代わりに探索予算（explore/exploit）で制御する（src/scout/explore.py）
 
-順位付けは合計点ではなく `early_signal`（成長性 × 競合の少なさ）を主に見る。
-合計点で並べると「すでに大流行しているテーマ」が上位に来て、システムの目的
-（まだ供給が薄い市場を早く見つける）と逆になるため。
+  - 旧: 順位は early_signal（成長性×競合の少なさ）
+  - 新: 順位は opportunity = sqrt(discovery × business)。「入る余地」だけでなく
+        「入って金になるか」も必要にした
+
+実測できる軸（無料）:
+  low_competition   ← SERP のドメイン種別分類（代理指標。confidence 低め）
+  trend_growth      ← X のいいね/時間、観測回数に対する伸び
+  source_reliability← 根拠URL数・独立ドメイン数
+  production_fit    ← 自前の AFF_* で換金経路が組めるか（config と環境変数から実測）
 """
 from __future__ import annotations
 
@@ -23,6 +26,7 @@ import logging
 from ..config import Config
 from ..llm import ClaudeClient
 from .models import RUBRIC, VERDICTS, Candidate, Opportunity, Research, Score
+from .serp import SerpAnalyzer, weakness_to_points
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +34,7 @@ SYSTEM_PROMPT = """あなたは収益機会を採点する評価者です。
 
 重要: 目的は「すでに大流行しているテーマ」を見つけることではなく、
 「需要が生まれ始めているのに供給・競合が少ない市場」を早く見つけることです。
-すでに大手が押さえているテーマは competition と demand が高くても低評価にしてください。
+すでに大手が押さえているテーマは demand が高くても低評価にしてください。
 
 採点は甘くしないでください。調査で「不明」だった項目は低く採点します。
 根拠が確認できない主張には高い点を付けないでください。"""
@@ -83,27 +87,28 @@ SCORE_SCHEMA = {
     "additionalProperties": False,
 }
 
+# 推測と実測がこれ以上ズレたら矛盾として記録する（配点校正の教師データ）
+DIVERGENCE_THRESHOLD = 5
+
 
 class Scorer:
-    def __init__(self, config: Config, llm: ClaudeClient | None = None,
-                 niche_revenue: dict[str, int] | None = None):
+    def __init__(self, config: Config, llm: ClaudeClient | None = None):
         self.config = config
         self.llm = llm or config.llm_client()
         scout = config.section("scout")
-        thresholds = scout.get("thresholds", {}) or {}
-        self.crowded_domains = int(thresholds.get("crowded_domains", 8))
-        self.min_likes_per_hour = float(thresholds.get("min_likes_per_hour", 5))
-        self.stale_after_seen = int(thresholds.get("stale_after_seen", 4))
-        self.now_score = int(thresholds.get("now_score", 70))
-        self.drop_score = int(thresholds.get("drop_score", 45))
-        self.now_early_signal = float(thresholds.get("now_early_signal", 0.55))
-        # 実際に収益が出たカテゴリへの加点（成果フィードバック）
-        self.niche_revenue = niche_revenue or {}
+        t = scout.get("thresholds", {}) or {}
+        self.min_likes_per_hour = float(t.get("min_likes_per_hour", 5))
+        self.stale_after_seen = int(t.get("stale_after_seen", 4))
+        self.now_score = int(t.get("now_score", 70))
+        self.drop_score = int(t.get("drop_score", 45))
+        self.now_opportunity = float(t.get("now_opportunity", 30))
+        self.drop_opportunity = float(t.get("drop_opportunity", 10))
+        self.serp = SerpAnalyzer(provider=scout.get("serp_provider", "heuristic"))
+        self._affiliate = None
 
     # ------------------------------------------------------------------
     def score(self, candidate: Candidate, research: Research,
               times_seen: int = 1) -> tuple[Score, str]:
-        """(Score, action) を返す。LLM が使えない場合は実測のみのスコアになる。"""
         data = self._score_via_llm(candidate, research, times_seen)
         if data is None:
             score = Score(scored=False,
@@ -118,7 +123,8 @@ class Scorer:
             )
             action = data.get("action", "")
 
-        self._apply_machine_adjustments(score, candidate, research, times_seen)
+        self._observe(score, candidate, research, times_seen)
+        self._record_divergences(score)
         return score, action
 
     def _score_via_llm(self, candidate: Candidate, research: Research,
@@ -127,13 +133,10 @@ class Scorer:
             return None
         measured = research.measured or {}
         prompt = PROMPT_TEMPLATE.format(
-            title=candidate.title,
-            summary=candidate.summary or "(なし)",
-            source=candidate.source,
-            signals=candidate.signals or "(なし)",
+            title=candidate.title, summary=candidate.summary or "(なし)",
+            source=candidate.source, signals=candidate.signals or "(なし)",
             times_seen=times_seen,
-            why_now=research.why_now or "不明",
-            jp_demand=research.jp_demand or "不明",
+            why_now=research.why_now or "不明", jp_demand=research.jp_demand or "不明",
             overseas_lead=research.overseas_lead or "不明",
             competitor_note=research.competitor_note or "不明",
             target_user=research.target_user or "不明",
@@ -145,67 +148,107 @@ class Scorer:
         )
         return self.llm.generate_json(SYSTEM_PROMPT, prompt, SCORE_SCHEMA)
 
-    # ------------------------------------------------------------------
-    def _apply_machine_adjustments(self, score: Score, candidate: Candidate,
-                                   research: Research, times_seen: int) -> None:
-        """実測シグナルでスコアを補正し、LLM との矛盾を記録する。"""
-        measured = research.measured or {}
-        domains = int(measured.get("competitor_domains", 0))
-        evidence = int(measured.get("evidence_count", 0))
+    # --- 実測による置き換え ---------------------------------------------
+    def _observe(self, score: Score, candidate: Candidate, research: Research,
+                 times_seen: int) -> None:
+        self._observe_competition(score, research)
+        self._observe_growth(score, candidate, times_seen)
+        self._observe_reliability(score, research)
+        score.route_available = self._has_route(candidate, research)
 
-        # 1. 「競合が少ない」と言いながら、検索で大量のドメインが出ている
-        if domains >= self.crowded_domains and score.low_competition >= 11:
-            score.machine_adjust -= 10
-            score.conflicts.append(
-                f"LLMは競合が少ないと判断（{score.low_competition}/15）だが、"
-                f"検索で独立ドメインが{domains}件見つかっている"
-            )
-            score.adjust_reasons.append(f"競合ドメイン{domains}件で -10")
+    def _observe_competition(self, score: Score, research: Research) -> None:
+        """SERP の守備力から「競合の少なさ」を実測で置き換える。"""
+        results = research.measured.get("results") or []
+        if not results:
+            return
+        weak = self.serp.analyze(results, research.measured.get("keywords", []))
+        if weak.confidence <= 0.15:
+            score.notes.append(f"SERP判定を採用せず（{'; '.join(weak.notes)}）")
+            return
 
-        # 2. 根拠 URL が 1 件も無い
-        if evidence == 0:
-            score.machine_adjust -= 8
-            score.adjust_reasons.append("根拠URLが0件で -8")
-            if score.source_reliability >= 4:
-                score.conflicts.append("根拠URLが0件なのに信頼性が高く採点されている")
+        points = weakness_to_points(weak.weakness, RUBRIC["low_competition"])
+        score.evidence.observe(
+            "low_competition", RUBRIC["low_competition"], points,
+            source=f"serp_{weak.provider}", confidence=weak.confidence,
+            note=f"weakness={weak.weakness} 内訳={weak.breakdown} "
+                 f"意図一致率={weak.intent_match_ratio} 古さ={weak.stale_ratio}",
+        )
+        research.measured["serp"] = weak.to_dict()
 
-        # 3. X 発掘なら伸びの速さを検証する（総いいね数ではなく速度）
+    def _observe_growth(self, score: Score, candidate: Candidate,
+                        times_seen: int) -> None:
+        """X のいいね/時間から「成長性」を実測で置き換える。"""
         velocity = float(candidate.signals.get("likes_per_hour", 0) or 0)
-        if candidate.source == "x_api":
-            if velocity < self.min_likes_per_hour:
-                score.machine_adjust -= 5
-                score.adjust_reasons.append(
-                    f"いいね/時間が{velocity}で閾値{self.min_likes_per_hour}未満のため -5")
-            elif velocity >= self.min_likes_per_hour * 4:
-                score.machine_adjust += 5
-                score.adjust_reasons.append(f"いいね/時間が{velocity}で急伸のため +5")
+        if candidate.source != "x_api" or velocity <= 0:
+            return
 
-        # 4. 何度も出てくるのに伸びない = 継続性ではなく陳腐化
+        # 閾値の 4 倍で満点になる線形換算。この換算自体が仮説なので mapping_version を持つ。
+        ceiling = self.min_likes_per_hour * 4
+        ratio = min(1.0, velocity / ceiling) if ceiling else 0.0
+        points = round(ratio * RUBRIC["trend_growth"])
+        note = f"likes_per_hour={velocity}"
+
+        # 何度も観測されているのに伸びない = 継続性ではなく陳腐化
         if times_seen >= self.stale_after_seen and velocity < self.min_likes_per_hour * 2:
-            score.machine_adjust -= 5
-            score.adjust_reasons.append(f"{times_seen}回観測されているが伸びていないため -5")
+            points = max(0, points - 5)
+            note += f" / {times_seen}回観測されているが伸びていない"
 
-        # 5. 実際に収益が出たカテゴリなら加点（成果フィードバック）
-        for keyword in candidate.keywords:
-            revenue = self.niche_revenue.get(keyword, 0)
-            if revenue > 0:
-                score.machine_adjust += 5
-                score.adjust_reasons.append(f"`{keyword}` は過去に{revenue:,}円の実績があり +5")
-                break
+        score.evidence.observe("trend_growth", RUBRIC["trend_growth"], points,
+                               source="x_velocity", confidence=0.7, note=note)
+
+    def _observe_reliability(self, score: Score, research: Research) -> None:
+        """根拠の量から「情報の信頼性」を実測で置き換える。"""
+        measured = research.measured or {}
+        evidence_count = int(measured.get("evidence_count", 0))
+        domains = int(measured.get("competitor_domains", 0))
+        if evidence_count == 0 and domains == 0 and not research.sources:
+            score.evidence.observe("source_reliability", RUBRIC["source_reliability"], 0,
+                                   source="evidence_count", confidence=0.9,
+                                   note="根拠URLが0件")
+            return
+        # 独立ドメイン3件以上で満点。1件のみは片寄りとみなす。
+        points = min(RUBRIC["source_reliability"], round(domains / 3 * RUBRIC["source_reliability"]))
+        score.evidence.observe("source_reliability", RUBRIC["source_reliability"], points,
+                               source="evidence_count", confidence=0.8,
+                               note=f"独立ドメイン{domains}件 / 根拠URL{evidence_count}件")
+
+    def _has_route(self, candidate: Candidate, research: Research) -> bool:
+        """自前の設定と AFF_* で換金経路が組めるかを実測する。
+
+        これが False の候補は Business Score が大きく下がる。換金経路のないネタに
+        制作能力を割かないため（既存 PLAYBOOK の「アフィリエイト・ファースト」と整合）。
+        """
+        if self._affiliate is None:
+            from ..monetize.affiliate import AffiliateEngine
+
+            self._affiliate = AffiliateEngine(self.config)
+
+        for key in [*candidate.keywords, "default"]:
+            if self._affiliate.build(key).has_route:
+                return True
+        return False
+
+    def _record_divergences(self, score: Score) -> None:
+        """推測と実測のズレを矛盾として記録する（減点はしない）。"""
+        for axis, diff in score.evidence.divergences().items():
+            if abs(diff) < DIVERGENCE_THRESHOLD:
+                continue
+            ev = score.evidence.items[axis]
+            direction = "過大評価" if diff < 0 else "過小評価"
+            score.conflicts.append(
+                f"{axis}: LLM {ev.inferred} → 実測 {ev.observed}（{direction} {abs(diff)}点, "
+                f"source={ev.source}, confidence={ev.confidence}）"
+            )
 
     # ------------------------------------------------------------------
     def decide_verdict(self, score: Score) -> str:
-        """最終判定。LLM と機械判定が食い違ったら保守的な側を採る。
-
-        自動投稿まで繋がるので、判定は甘い側に倒さない。ただし採点自体が行われて
-        いない場合（APIキー未設定など）は合計点0を「捨てる」と解釈せず保留する。
-        """
+        """LLM 判定 / 素点 / opportunity の3つで、最も保守的なものを採る。"""
         if not score.scored:
             return "watch"
 
-        if score.total < self.drop_score:
+        if score.total < self.drop_score or score.opportunity < self.drop_opportunity:
             machine = "drop"
-        elif score.total >= self.now_score and score.early_signal >= self.now_early_signal:
+        elif score.total >= self.now_score and score.opportunity >= self.now_opportunity:
             machine = "now"
         else:
             machine = "watch"
@@ -214,19 +257,21 @@ class Scorer:
         final = machine if rank[machine] <= rank.get(score.llm_verdict, 1) else score.llm_verdict
         if final != score.llm_verdict:
             score.conflicts.append(
-                f"LLM判定は{score.llm_verdict}だが機械判定は{machine}。保守側の{final}を採用"
+                f"LLM判定は{score.llm_verdict}だが機械判定は{machine}"
+                f"（総合{score.total} / 機会{score.opportunity}）。保守側の{final}を採用"
             )
         return final
 
     def rank(self, opportunities: list[Opportunity]) -> list[Opportunity]:
-        """順位付け。合計点ではなく early_signal を主軸にする。
+        """順位付け。opportunity = sqrt(discovery × business) を主軸にする。
 
-        合計点だけで並べると「すでに大流行しているテーマ」が上に来てしまい、
-        システムの目的と逆になる。
+        discovery だけで並べると「入る余地はあるが金にならない」テーマが上位に来る。
+        business だけで並べると「金になるが大手だらけ」のテーマが上位に来る。
+        相乗平均なので、どちらかがゼロに近い候補は上に来ない。
         """
         return sorted(
             opportunities,
-            key=lambda o: (o.score.scored, o.score.early_signal, o.score.total,
+            key=lambda o: (o.score.scored, o.score.opportunity, o.score.discovery,
                            float(o.candidate.signals.get("likes_per_hour", 0) or 0)),
             reverse=True,
         )

@@ -30,8 +30,8 @@ def test_1位の見出しと必要項目が出る():
     report = render_daily_report([_opportunity("abc", "インボイス需要", demand=18)], top_n=3)
 
     for expected in ("今日の1位", "インボイス需要", "なぜ今なのか", "想定ユーザー",
-                     "収益化方法", "リスク", "総合スコア", "早期シグナル",
-                     "今やるべきアクション", "/adopt abc"):
+                     "収益化方法", "リスク", "機会スコア", "発見スコア", "収益スコア",
+                     "実測で埋まった軸", "今やるべきアクション", "/adopt abc"):
         assert expected in report
 
 
@@ -50,6 +50,24 @@ def test_未採点は警告が出る():
     o.score.scored = False
 
     assert "未採点" in render_daily_report([o], top_n=1)
+
+
+def test_換金経路がなければ警告が出る():
+    o = _opportunity("abc", "ネタ", demand=18)
+    o.score.route_available = False
+
+    assert "換金経路なし" in render_daily_report([o], top_n=1)
+
+
+def test_実測で置き換えた軸が表示される():
+    o = _opportunity("abc", "ネタ", demand=18)
+    o.score.evidence.observe("low_competition", 15, 3,
+                             source="serp_heuristic", confidence=0.45, note="大手多数")
+
+    report = render_daily_report([o], top_n=1)
+
+    assert "実測で置き換えた軸" in report
+    assert "serp_heuristic" in report
 
 
 def test_LLMと実測の食い違いが表示される():

@@ -132,28 +132,6 @@ class RevenueLog:
         lines.extend(["", "収益は `python -m src.pipeline revenue --amount <円> --source <ASP名>` で記録する。"])
         return "\n".join(lines)
 
-    def revenue_by_token(self, days: int = 90) -> dict[str, int]:
-        """収益を source / note のトークン単位に割り当てて返す。
-
-        探索レイヤのスコア補正（実際に金になったテーマを加点する）に使う。
-        `/revenue 3200 A8 AI議事録` のように note にテーマ名を書いておくと、
-        そのキーワードを含むネタが翌日以降のスコアで加点される。
-        """
-        from ..scout.models import normalize_tokens
-
-        cutoff = datetime.now(timezone.utc).timestamp() - days * 86400
-        totals: dict[str, int] = {}
-        for row in self._read(self.revenue_csv):
-            if self._ts(row.get("timestamp", "")) < cutoff:
-                continue
-            try:
-                amount = int(float(row.get("amount_jpy", 0)))
-            except ValueError:
-                continue
-            for token in normalize_tokens(row.get("source", ""), row.get("note", "")):
-                totals[token] = totals.get(token, 0) + amount
-        return totals
-
     # ------------------------------------------------------------------
     @staticmethod
     def _ts(value: str) -> float:

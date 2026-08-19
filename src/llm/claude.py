@@ -85,8 +85,11 @@ class ClaudeClient:
             return None
 
     def research(self, system: str, prompt: str, max_uses: int = 6,
-                 tool_type: str = "web_search_20260209") -> tuple[str, list[str]] | None:
-        """web_search サーバーツールで裏取りし、(本文, 参照URL) を返す。
+                 tool_type: str = "web_search_20260209") -> tuple[str, list[dict]] | None:
+        """web_search サーバーツールで裏取りし、(本文, 検索結果) を返す。
+
+        検索結果は [{"url": ..., "title": ...}, ...]。タイトルは SERP のドメイン種別
+        分類と検索意図の一致率判定（src/scout/serp.py）に使う。
 
         ちゃっぴー案では Gemini に担当させていた工程。Claude のサーバー側 web_search を
         使えば「検索して読んで書く」が1リクエストで済むため、プロバイダを増やさずに
@@ -117,16 +120,17 @@ class ClaudeClient:
             return None
 
         text = "\n".join(b.text for b in response.content if b.type == "text")
-        return text, self._collect_urls(response)
+        return text, self._collect_results(response)
 
     @staticmethod
-    def _collect_urls(response) -> list[str]:
-        """web_search の結果ブロックから参照 URL を集める。
+    def _collect_results(response) -> list[dict]:
+        """web_search の結果ブロックから URL とタイトルを集める。
 
         サーバーツールのエラーは例外ではなく 200 で返り、成功時の `content` は
         リスト、エラー時はオブジェクトになる。indexing する前に型で分岐する。
         """
-        urls: list[str] = []
+        results: list[dict] = []
+        seen: set[str] = set()
         for block in response.content:
             if getattr(block, "type", "") != "web_search_tool_result":
                 continue
@@ -137,6 +141,8 @@ class ClaudeClient:
                 continue
             for result in content:
                 url = getattr(result, "url", "")
-                if url and url not in urls:
-                    urls.append(url)
-        return urls
+                if not url or url in seen:
+                    continue
+                seen.add(url)
+                results.append({"url": url, "title": getattr(result, "title", "") or ""})
+        return results

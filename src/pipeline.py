@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 from pathlib import Path
 
 from .config import ARTICLE_DIR, Config, OUTPUT_DIR
@@ -120,11 +121,15 @@ class Pipeline:
             return self._render_status()
 
         # 探索レイヤのコマンド。scout は重い import を持つので遅延ロードする。
-        if cmd.action in ("adopt", "drop"):
+        if cmd.action in ("adopt", "drop", "metrics"):
             from .scout import ScoutPipeline
 
             scout = ScoutPipeline(self.config)
-            return scout.adopt(cmd.target) if cmd.action == "adopt" else scout.drop(cmd.target)
+            if cmd.action == "adopt":
+                return scout.adopt(cmd.target)
+            if cmd.action == "drop":
+                return scout.drop(cmd.target)
+            return scout.record_metrics(cmd.target, _parse_metrics(cmd.note))
 
         if cmd.action == "revenue":
             try:
@@ -139,6 +144,8 @@ class Pipeline:
             approved, skipped = self.queue.approve_all(self.exclude_flagged)
             for item_id in approved:
                 self._log_status(item_id, "approved")
+                approved_item = self.queue.get(item_id)
+                self._log_attention("approve", approved_item.category if approved_item else "")
             lines = [f"✅ {len(approved)}件を承認しました。"]
             if approved:
                 lines.append("　" + ", ".join(f"`{i}`" for i in approved))
@@ -155,10 +162,12 @@ class Pipeline:
         if cmd.action == "approve":
             self.queue.approve(cmd.target)
             self._log_status(cmd.target, "approved")
+            self._log_attention("approve", item.category)
             return f"✅ `{cmd.target}` を承認しました。次の publish で投稿されます。"
 
         self.queue.reject(cmd.target, cmd.note)
         self._log_status(cmd.target, "rejected")
+        self._log_attention("reject", item.category)
         reason = f"（理由: {cmd.note}）" if cmd.note else ""
         return f"🚫 `{cmd.target}` を却下しました{reason}"
 
@@ -171,6 +180,19 @@ class Pipeline:
                 flag = " ⚠️" if item.flagged else ""
                 lines.append(f"  - `{item.id}`{flag} {item.script.get('title', '')}")
         return "\n".join(lines)
+
+    def _log_attention(self, action: str, niche_slug: str = "") -> None:
+        """判断1回分の時間を台帳に記録する。
+
+        最終的な目的関数「人間の判断1分あたりの期待収益」の分母は、推定ではなく
+        実測できる唯一の項なので、承認のたびに数える。
+        """
+        try:
+            from .scout.ledger import ExperimentLedger
+
+            ExperimentLedger().record_attention(action, niche_slug)
+        except Exception as exc:   # 台帳が無くても制作は止めない
+            logger.debug("判断時間の記録をスキップしました: %s", exc)
 
     def _log_status(self, item_id: str, status: str) -> None:
         item = self.queue.get(item_id)
@@ -245,6 +267,25 @@ def _cmd_run(args) -> None:
     Pipeline().run(limit=args.limit, use_sample=args.sample, open_issue=args.open_issue)
 
 
+def _parse_metrics(text: str) -> dict[str, int]:
+    """`posts=8 impressions=4,000 clicks=20` を dict にする。数値以外は無視する。
+
+    スマホから打つので桁区切りのカンマが入ることを想定し、数字の間のカンマだけ落とす
+    （区切り文字としてのカンマは残す）。
+    """
+    text = re.sub(r"(?<=\d),(?=\d)", "", text or "")
+    values: dict[str, int] = {}
+    for token in text.replace(",", " ").split():
+        key, sep, raw = token.partition("=")
+        if not sep:
+            continue
+        try:
+            values[key.strip().lower()] = int(float(raw))
+        except ValueError:
+            logger.warning("数値として読めない値を無視しました: %s", token)
+    return values
+
+
 def _cmd_scout(args) -> None:
     from .scout import ScoutPipeline
 
@@ -282,8 +323,28 @@ def _cmd_publish(args) -> None:
     Pipeline().publish_approved()
 
 
+def _cmd_calibrate(args) -> None:
+    """予測 vs 実績の対応表を出す。配点の見直しはこの表を見てから行う。"""
+    from .scout.ledger import ExperimentLedger
+
+    ledger = ExperimentLedger()
+    table = ledger.calibration_table()
+    if not table:
+        print("予測と実績が対応した行がまだありません。"
+              "`/adopt` で採用し、`/metrics` で実績を記録してください。")
+        return
+    keys = list(table[0].keys())
+    print(" | ".join(keys))
+    print("-|-".join("-" * len(k) for k in keys))
+    for row in table:
+        print(" | ".join(str(row[k]) for k in keys))
+
+
 def _cmd_report(args) -> None:
+    from .scout.ledger import ExperimentLedger
+
     report = RevenueLog().render_report(days=args.days)
+    report = f"{report}\n\n{ExperimentLedger().render_report()}"
     print(report)
     if args.issue_title:
         GitHubIssueSurface(Config.load()).create_issue(args.issue_title, report)
@@ -332,6 +393,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_rep.add_argument("--days", type=int, default=7)
     p_rep.add_argument("--issue-title", default="", help="指定すると Issue として投稿する")
     p_rep.set_defaults(func=_cmd_report)
+
+    p_cal = sub.add_parser("calibrate", help="予測 vs 実績の対応表を出す")
+    p_cal.set_defaults(func=_cmd_calibrate)
 
     p_money = sub.add_parser("revenue", help="発生した収益を記録")
     p_money.add_argument("--amount", type=int, required=True, help="金額（円）")

@@ -15,4 +15,5 @@ data/output/*.storyboard.json
 # GitHub Actions のランナーは実行ごとに破棄されるため、承認キューと各種ログを
 # リポジトリに残すことで「生成ジョブ → 承認 → 投稿ジョブ」を跨いで状態を引き継ぐ。
 # （data/review_queue/*.json, data/articles/*.md, data/posts.csv, data/revenue.csv,
-#   data/scout/opportunities.jsonl, data/adopted_niches.yaml）
+#   data/scout/opportunities.jsonl, data/scout/ledger.jsonl,
+#   data/adopted_niches.yaml）

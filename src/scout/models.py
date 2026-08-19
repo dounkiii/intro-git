@@ -8,9 +8,12 @@ LLM は「競合の少なさ」を推測でしか答えられないため、主�
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
+
+from .evidence import EvidenceSet
 
 # ちゃっぴー案の評価軸をそのまま採用（合計100点）
 RUBRIC = {
@@ -96,7 +99,16 @@ class Research:
 
 @dataclass
 class Score:
-    """100点満点の内訳と、実測による補正。"""
+    """評価軸ごとの点数と、そこから合成した3つのスコア。
+
+    軸に代入する整数は **LLM の推測値**。実測が入ると `evidence` 側が優先され、
+    `total` は実測ベースに切り替わる（推測値は校正用に残る）。
+
+    最終順位は `opportunity` = sqrt(discovery × business)。
+    GPT からの指摘（採用）: 「急成長 × 競合ゼロ」でも購買意欲もアフィリ案件も無ければ
+    稼げない。逆に金になるテーマでも入る余地がなければ意味がない。積にすることで
+    **どちらかがゼロに近い候補を上位に出さない**。
+    """
 
     demand: int = 0
     low_competition: int = 0
@@ -109,37 +121,105 @@ class Score:
 
     llm_verdict: str = "watch"
     rationale: str = ""
-    # LLM による採点が実際に行われたか。false のときは合計点0を「捨てる」と解釈しない。
     scored: bool = False
 
-    # --- 実測による補正（LLM の自己申告を機械シグナルで殴る） ---
-    machine_adjust: int = 0
-    adjust_reasons: list[str] = field(default_factory=list)
-    conflicts: list[str] = field(default_factory=list)
+    # 観測と推測の分離（src/scout/evidence.py）
+    evidence: EvidenceSet = field(default_factory=EvidenceSet)
+    # 自前パイプラインで換金経路が組めるか。config と AFF_* から実測する。
+    route_available: bool | None = None
 
+    conflicts: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        for axis, max_points in RUBRIC.items():
+            self.evidence.set_inferred(axis, max_points, getattr(self, axis))
+
+    # --- 素点 -----------------------------------------------------------
     @property
     def llm_total(self) -> int:
+        """LLM の推測だけの合計。実測導入の効果を測るため並列で保持する。"""
         return sum(getattr(self, k) for k in RUBRIC)
 
     @property
     def total(self) -> int:
-        return max(0, min(100, self.llm_total + self.machine_adjust))
+        """実測で解決済みの合計。"""
+        return sum(self.evidence.value(k) for k in RUBRIC)
 
     @property
-    def early_signal(self) -> float:
-        """本システムの中核指標: 「伸びているのに競合が少ない」度合い。
+    def confidence(self) -> float:
+        return self.evidence.confidence
 
-        単なる合計点だと「すでに大流行しているテーマ」が上位に来てしまう。
-        成長性 × 競合の少なさ を別軸で持ち、順位付けはこちらを重く見る。
+    @property
+    def observed_ratio(self) -> float:
+        return self.evidence.observed_ratio
+
+    # --- 合成スコア -----------------------------------------------------
+    @property
+    def momentum(self) -> float:
+        return self.evidence.ratio("trend_growth")
+
+    @property
+    def whitespace(self) -> float:
+        return self.evidence.ratio("low_competition")
+
+    @property
+    def discovery(self) -> float:
+        """今入り込む余地があるか（0-100）。
+
+        evidence_confidence を掛けているので、根拠が薄い候補は自動的に割り引かれる。
+        実測が1つも無い段階では全候補が等しく割り引かれるため順位は変わらない。
         """
-        growth = self.trend_growth / RUBRIC["trend_growth"]
-        room = self.low_competition / RUBRIC["low_competition"]
-        return round(growth * room, 3)
+        return round(100 * self.momentum * self.whitespace * self.confidence, 1)
+
+    @property
+    def monetization(self) -> float:
+        return (self.evidence.ratio("monetizability")
+                + self.evidence.ratio("affiliate_fit")) / 2
+
+    @property
+    def production_fit(self) -> float:
+        """既存の制作パイプラインとの相性。換金経路の有無は実測。"""
+        route = 1.0 if self.route_available else (0.2 if self.route_available is False else 0.6)
+        return (self.evidence.ratio("contentability")
+                + self.evidence.ratio("durability") + route) / 3
+
+    @property
+    def business(self) -> float:
+        """入った場合に金になるか（0-100）。"""
+        return round(100 * self.evidence.ratio("demand")
+                     * self.monetization * self.production_fit, 1)
+
+    @property
+    def opportunity(self) -> float:
+        """最終順位に使うスコア（0-100）。相乗平均なので片方が0なら0。"""
+        return round(math.sqrt(max(0.0, self.discovery) * max(0.0, self.business)), 1)
 
     def to_dict(self) -> dict:
-        d = asdict(self)
-        d.update(llm_total=self.llm_total, total=self.total, early_signal=self.early_signal)
+        d = {k: getattr(self, k) for k in RUBRIC}
+        d.update(
+            llm_verdict=self.llm_verdict, rationale=self.rationale, scored=self.scored,
+            route_available=self.route_available,
+            conflicts=self.conflicts, notes=self.notes,
+            evidence=self.evidence.to_dict(),
+            llm_total=self.llm_total, total=self.total,
+            confidence=self.confidence, observed_ratio=self.observed_ratio,
+            momentum=self.momentum, whitespace=self.whitespace,
+            discovery=self.discovery, business=self.business,
+            opportunity=self.opportunity,
+        )
         return d
+
+    @classmethod
+    def from_dict(cls, data: dict | None) -> "Score":
+        data = data or {}
+        fields = {k: v for k, v in data.items()
+                  if k in cls.__dataclass_fields__ and k != "evidence"}
+        score = cls(**fields)
+        restored = EvidenceSet.from_dict(data.get("evidence"))
+        if restored.items:
+            score.evidence = restored
+        return score
 
 
 @dataclass
@@ -173,13 +253,11 @@ class Opportunity:
 
     @classmethod
     def from_dict(cls, data: dict) -> "Opportunity":
-        score_data = {k: v for k, v in (data.get("score") or {}).items()
-                      if k in Score.__dataclass_fields__}
         return cls(
             id=data["id"],
             candidate=Candidate(**(data.get("candidate") or {"title": ""})),
             research=Research(**(data.get("research") or {})),
-            score=Score(**score_data),
+            score=Score.from_dict(data.get("score")),
             verdict=data.get("verdict", "watch"),
             action=data.get("action", ""),
             first_seen=data.get("first_seen", ""),

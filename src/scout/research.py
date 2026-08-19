@@ -82,11 +82,12 @@ class Researcher:
 
     def investigate(self, candidate: Candidate) -> Research:
         """1件の候補を裏取りする。LLM が使えない場合は空の Research を返す。"""
+        known = [{"url": u, "title": ""} for u in candidate.evidence_urls]
         if not self.available:
             # 調査していなくても、発掘元が持っていた URL は実測値として残す
             return Research(competitor_note="未調査（ANTHROPIC_API_KEY 未設定）",
                             sources=list(candidate.evidence_urls),
-                            measured=self.measure(candidate.evidence_urls))
+                            measured=self.measure(known, candidate.keywords))
 
         prompt = PROMPT_TEMPLATE.format(
             title=candidate.title,
@@ -101,10 +102,16 @@ class Researcher:
                                   max_uses=self.max_searches, tool_type=self.tool_type)
         if found is None:
             # 検索が使えない環境でも、モデルの知識だけで構造化までは進める
-            notes, urls = "", list(candidate.evidence_urls)
+            notes, results = "", known
         else:
-            notes, urls = found
-            urls = list(dict.fromkeys([*candidate.evidence_urls, *urls]))
+            notes, found_results = found
+            merged = {r["url"]: r for r in known}
+            for r in found_results:
+                merged.setdefault(r["url"], r)
+                if r.get("title"):
+                    merged[r["url"]]["title"] = r["title"]
+            results = list(merged.values())
+        urls = [r["url"] for r in results]
 
         # 2回目: 構造化。structured outputs はサーバーツールと併用しないよう分けている。
         structured = self.llm.generate_json(
@@ -114,7 +121,7 @@ class Researcher:
         )
         if structured is None:
             return Research(competitor_note="未調査（生成に失敗）", sources=urls,
-                            measured=self.measure(urls))
+                            measured=self.measure(results, candidate.keywords))
 
         return Research(
             why_now=structured.get("why_now", ""),
@@ -126,26 +133,29 @@ class Researcher:
             best_product=structured.get("best_product", ""),
             risks=structured.get("risks", []),
             sources=urls,
-            measured=self.measure(urls),
+            measured=self.measure(results, candidate.keywords),
         )
 
     # ------------------------------------------------------------------
     @staticmethod
-    def measure(urls: list[str]) -> dict:
+    def measure(results: list[dict], keywords: list[str] | None = None) -> dict:
         """LLM の自己申告ではない実測値。
 
-        `competitor_domains` は検索で実際に見えた独立ドメイン数。これが多いのに
-        LLM が「競合が少ない」と答えたら、scoring 側でスコアを引き下げて矛盾を立てる。
+        `results`（URL とタイトル）をそのまま持ち回るのが要点。scoring 側が
+        SERP のドメイン種別分類（src/scout/serp.py）に使い、「競合の少なさ」の
+        点数を LLM の推測から実測へ置き換える。
         """
         domains: set[str] = set()
-        for url in urls:
-            host = urlparse(url).netloc.lower()
+        for r in results:
+            host = urlparse(r.get("url", "")).netloc.lower()
             if host.startswith("www."):
                 host = host[4:]
             if host:
                 domains.add(host)
         return {
-            "evidence_count": len(urls),
+            "evidence_count": len(results),
             "competitor_domains": len(domains),
             "domains": sorted(domains)[:20],
+            "results": results[:20],
+            "keywords": list(keywords or []),
         }

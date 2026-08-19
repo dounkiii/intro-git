@@ -53,14 +53,32 @@ scout:
   min_likes: 30
   max_results_per_query: 25
 
-  # スコア補正の閾値（LLM の自己申告を実測で殴るための基準）
+  # 競合の少なさをどう測るか。heuristic は Claude の web_search 結果をドメイン種別に
+  # 分類する無料の代理指標（confidence を低く固定してある）。
+  # 初売上が出たら有料 SERP API に差し替える想定。
+  serp_provider: 'heuristic'   # heuristic | dataforseo | serpapi（後者2つは未実装）
+
+  # 探索予算。収益実績への加点をやめた代わりに、調査枠を分けて
+  # 「勝っている市場ばかり再発見する」ループを防ぐ。
+  explore_ratio: 0.2           # 採用済みニッチと無関係な候補に回す枠の割合
+
   thresholds:
-    crowded_domains: 8        # 検索でこれ以上の独立ドメインが出たら「競合が多い」
     min_likes_per_hour: 5     # これ未満は「伸び始めている」と認めない
-    stale_after_seen: 4       # これ以上観測されて伸びなければ陳腐化として減点
-    now_score: 70             # 「今すぐ狙う」の合計点しきい値
+    stale_after_seen: 4       # これ以上観測されて伸びなければ陳腐化とみなす
+    now_score: 70             # 「今すぐ狙う」の素点しきい値（100点満点は変えない）
     drop_score: 45            # これ未満は「捨てる」
-    now_early_signal: 0.55    # 「今すぐ狙う」に必要な早期シグナル
+    now_opportunity: 30       # 「今すぐ狙う」に必要な opportunity スコア
+    drop_opportunity: 10      # これ未満は「捨てる」
+
+  # 撤退判定。時間ではなく「十分な試行回数」で判定する。
+  # 実績が溜まったら分布を見てここを上げる（現状は保守的な仮の値）。
+  funnel:
+    min_posts: 8                    # これだけ投稿したら判定してよい
+    min_impressions: 2000           # またはこれだけインプが出たら
+    min_impressions_per_post: 150   # Stage1: 下回れば「配信されていない」
+    min_engagement_rate: 0.02       # Stage2: 下回れば「見られているが刺さっていない」
+    min_ctr: 0.005                  # Stage3: 下回れば「導線が弱い」
+    min_conversions: 1              # Stage4: 下回れば「案件が悪い」
 
   # Grok (xAI) 発掘。X 上の空気を読む部分は他モデルで代替しにくいので残している。
   # Web 検索は Claude の web_search で足りるので Gemini は使わない。

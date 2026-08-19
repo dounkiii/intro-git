@@ -12,6 +12,7 @@
 |---|---|---|---|
 | **探索** (`src/scout/`) | まだ競合が薄いのに伸び始めたネタを発掘・裏取り・採点 | `/adopt <id>` どのニッチを攻めるか | 週1〜数日に1回 |
 | **制作** (`src/`) | 採用ニッチで台本・記事・動画を生成し投稿 | `/approve <id>` 出すか出さないか | 毎日3〜5分 |
+| **検証** (`src/scout/ledger.py`) | 予測を凍結し、実績と突き合わせて配点を校正 | `/metrics <niche> ...` 実績の入力 | 週1回30秒 |
 
 📘 **戦略**: [docs/PLAYBOOK.md](docs/PLAYBOOK.md)（収益条件の実数・90日プラン・地雷リスト）
 🔎 **探索レイヤ設計**: [docs/RESEARCH_SYSTEM.md](docs/RESEARCH_SYSTEM.md)（評価軸・実測補正・データ構造）
@@ -36,8 +37,8 @@
 ```
 [毎朝 5:00 JST] GitHub Actions — 探索
   X API / Grok で兆候発掘 → 過去ネタと統合 → Claude(web_search) で裏取り
-    → 100点採点 + 実測補正（LLMの自己申告を検索実測で殴る）
-    → 早期シグナル（成長性×競合の少なさ）順に並べて「今日の1位」Issue
+    → 100点採点。測れた軸は実測が推測を置き換える（SERP分類・いいね/時間・根拠数）
+    → 機会スコア √(発見 × 収益) 順に並べて「今日の1位」Issue
                     ↓
 [通勤中] スマホで:  /adopt f2af5ac317     ← どのニッチを攻めるか
                     ↓
@@ -54,10 +55,29 @@
 [即座に] GitHub Actions
   TikTok へ投稿 + 記事を data/articles/ に書き出し + 収益ログに記録
                     ↓
-[毎週火曜] 週次レポート Issue（投稿数 / 承認率 / 収益 / 次の打ち手）
+[週1回] スマホで:  /metrics adopted_xxx posts=12 impressions=6000 clicks=45
                     ↓
-        /revenue 3200 A8 インボイス   ← 成果が探索レイヤのスコアに還る
+        ファネル段階を診断（Stage1 配信されない 〜 Stage5 売れている）
+        「ニッチが悪い」「動画が悪い」「商品が悪い」を切り分ける
+                    ↓
+[毎週火曜] 週次レポート Issue
+        投稿数 / 承認率 / 収益 / **判断1分あたり収益** / 詰まっている段階
+                    ↓
+        予測 vs 実績を Experiment Ledger に蓄積 → 20件で配点を校正
 ```
+
+**スコアの構造**
+
+```
+opportunity = √(discovery × business)          ← 最終順位（相乗平均）
+
+discovery = 成長性 × 競合の空き × 根拠の信頼度   「今入り込む余地があるか」
+business  = 需要   × 収益化     × 制作相性       「入って金になるか」
+```
+
+片方がゼロに近い候補は上位に来ない。「伸びているが金にならない」も
+「金になるが大手だらけ」も除外される。詳細は
+[docs/RESEARCH_SYSTEM.md](docs/RESEARCH_SYSTEM.md)。
 
 **ニッチは「お金・税金・社会保険・給付金」**。高単価アフィリが揃い、制度改正でネタが自動供給され、
 個人を名指ししないので法務リスクが低い。炎上ネタを使わない理由は PLAYBOOK の 3 に書いた。
@@ -124,9 +144,15 @@ python -m src.pipeline command --body "/status"
 # 承認済みを投稿（DRY_RUN=true の間はファイル出力のみ）
 python -m src.pipeline publish --approved
 
-# 収益を記録して週次レポートを見る
+# 実績を入れてファネル段階を診断
+python -m src.pipeline command --body "/metrics adopted_xxx posts=12 impressions=6000 clicks=45"
+
+# 収益を記録して週次レポート（Experiment Ledger のサマリ付き）を見る
 python -m src.pipeline revenue --amount 3200 --source A8 --note 確定申告ソフト
 python -m src.pipeline report --days 7
+
+# 予測 vs 実績の対応表（配点の見直しはこれを見てから）
+python -m src.pipeline calibrate
 ```
 
 ## Issue コメントコマンド
@@ -137,9 +163,10 @@ python -m src.pipeline report --days 7
 | `/reject <id> [理由]` | 却下（理由はログに残る） |
 | `/approve all` | 未処理を一括承認（**`safety_flags` 付きは除外**） |
 | `/status` | キュー状況を返信 |
-| `/revenue <金額> <ASP名> [メモ]` | 収益を記録（メモのキーワードが探索スコアに +5 で還る） |
-| `/adopt <id>` | 探索レイヤのネタを採用 → 翌朝から制作対象になる |
+| `/revenue <金額> <ASP名> [メモ]` | 収益を記録 |
+| `/adopt <id>` | 探索レイヤのネタを採用 → 翌朝から制作対象になる。**予測が凍結される** |
 | `/drop <id>` | そのネタを捨てる（以後再提示されない） |
+| `/metrics <niche> posts=12 impressions=6000 clicks=45 conversions=1 revenue=3200` | 実績を記録してファネル段階を診断 |
 
 `approval-queue` / `scout-report` ラベルの付いた Issue で、
 リポジトリのオーナー/メンバーのコメントのみ受け付ける。
@@ -186,8 +213,13 @@ src/
   scout/                   === 探索レイヤ ===
     sources/x_api.py       X API から需要の兆候 + いいね/時間の実測
     sources/grok.py        Grok (xAI) 発掘。任意・無効可
-    research.py            web_search で裏取り + 独立ドメイン数の実測
-    scoring.py             100点採点 → 実測補正 → 保守側判定 → 早期シグナル順
+    research.py            web_search で裏取り（URL とタイトルを実測値として保持）
+    evidence.py            観測と推測の分離。実測は推測を置き換える
+    serp.py                SERPの守備力。provider差し替え式（既定は無料の代理指標）
+    scoring.py             100点採点 → 実測で置換 → 保守側判定 → 機会スコア順
+    explore.py             explore/exploit 予算（勝ち市場の再発見ループを防ぐ）
+    funnel.py              Stage1〜5 の切り分けと試行回数ベースの撤退判定
+    ledger.py              予測の凍結・実績追記・判断時間の積算・校正ゲート
     store.py               JSONL 永続化と重複統合（観測回数の追跡）
     niches.py              /adopt で制作レイヤへ接続
     report.py              「今日の1位」レポート
@@ -210,6 +242,7 @@ src/
   scheduler.py             ローカル用の簡易定期実行
 data/
   scout/opportunities.jsonl 探索結果（コミットされる）
+  scout/ledger.jsonl       予測 / 実績 / 判断時間の台帳（コミットされる）
   adopted_niches.yaml      採用ニッチ = 探索と制作の接点（コミットされる）
   review_queue/*.json      承認キュー（コミットされる）
   articles/*.md            書き出した記事（コミットされる）

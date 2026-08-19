@@ -39,10 +39,15 @@ def render_opportunity(opportunity: Opportunity, rank: int) -> str:
         "**リスク**",
         _bullets(r.risks, "特になし"),
         "",
-        f"**収益性スコア**: {s.monetizability}/20　"
-        f"**総合スコア**: {s.total}/100"
-        f"（LLM {s.llm_total} {s.machine_adjust:+d} 補正）",
-        f"**早期シグナル**（成長性×競合の少なさ）: {s.early_signal}",
+        f"**機会スコア**: {s.opportunity}/100　"
+        f"= √(発見 {s.discovery} × 収益 {s.business})",
+        f"　発見スコア（入る余地）: 成長 {s.momentum:.0%} × 競合の空き {s.whitespace:.0%}"
+        f" × 根拠信頼度 {s.confidence:.0%}",
+        f"　収益スコア（金になるか）: 需要 {s.evidence.ratio('demand'):.0%}"
+        f" × 収益化 {s.monetization:.0%} × 制作相性 {s.production_fit:.0%}"
+        f"{'' if s.route_available else '（⚠️ 換金経路なし）'}",
+        f"**素点**: {s.total}/100（LLM推測のみだと {s.llm_total}）　"
+        f"**実測で埋まった軸**: {s.observed_ratio:.0%}",
         f"**観測回数**: {opportunity.times_seen}回",
         "",
         f"**今やるべきアクション**: {opportunity.action or '未検討'}",
@@ -53,10 +58,15 @@ def render_opportunity(opportunity: Opportunity, rank: int) -> str:
                       "スコアは 0 のままです。数値を判断に使わないでください。"]
     if s.conflicts:
         lines += ["", "> ⚠️ **LLMと実測の食い違い**", *[f"> - {x}" for x in s.conflicts]]
-    if s.adjust_reasons:
-        lines += ["", f"<details><summary>スコア補正の内訳</summary>\n\n"
-                      f"{_bullets(s.adjust_reasons)}\n\n"
-                      f"判定理由: {s.rationale or '（なし）'}\n\n</details>"]
+    observed = [f"{a}: 実測 {e.observed}/{e.max_points} "
+                f"(source={e.source}, confidence={e.confidence}) {e.note}"
+                for a, e in s.evidence.items.items() if e.is_observed]
+    if observed or s.notes:
+        lines += ["", "<details><summary>実測の内訳とスコアの根拠</summary>", "",
+                  "**実測で置き換えた軸**", _bullets(observed, "なし（すべてLLMの推測）"), ""]
+        if s.notes:
+            lines += ["**メモ**", _bullets(s.notes), ""]
+        lines += [f"判定理由: {s.rationale or '（なし）'}", "", "</details>"]
     if r.sources:
         lines += ["", "<details><summary>根拠（参照URL）</summary>", "",
                   _bullets(r.sources[:15]), "", "</details>"]
@@ -78,8 +88,9 @@ def render_daily_report(ranked: list[Opportunity], top_n: int = 3,
     header = [
         f"{scanned or len(ranked)}件を評価し、上位{len(top)}件を提示します。",
         "",
-        "順位は合計点ではなく**早期シグナル（成長性×競合の少なさ）**で決めています。"
-        "すでに大流行しているテーマを上位に出さないためです。",
+        "順位は **機会スコア = √(発見スコア × 収益スコア)** で決めています。"
+        "相乗平均なので「入る余地はあるが金にならない」「金になるが大手だらけ」の"
+        "どちらも上位に来ません。",
         "",
         "```",
         "/adopt <id>   採用 → 翌朝からこのテーマでコンテンツが生成される",
@@ -95,11 +106,12 @@ def render_daily_report(ranked: list[Opportunity], top_n: int = 3,
     rest = ranked[top_n:]
     if rest:
         rows = ["<details><summary>その他の候補（{}件）</summary>".format(len(rest)), "",
-                "| id | ネタ | 総合 | 早期シグナル | 判定 |",
-                "|---|---|---|---|---|"]
+                "| id | ネタ | 機会 | 発見 | 収益 | 実測率 | 判定 |",
+                "|---|---|---|---|---|---|---|"]
         for o in rest[:20]:
-            rows.append(f"| `{o.id}` | {o.candidate.title[:40]} | {o.score.total} "
-                        f"| {o.score.early_signal} | {o.verdict} |")
+            rows.append(f"| `{o.id}` | {o.candidate.title[:40]} | {o.score.opportunity} "
+                        f"| {o.score.discovery} | {o.score.business} "
+                        f"| {o.score.observed_ratio:.0%} | {o.verdict} |")
         rows += ["", "</details>", ""]
         body.extend(rows)
 
