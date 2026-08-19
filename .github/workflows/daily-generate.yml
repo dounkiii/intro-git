@@ -1,0 +1,80 @@
+# 毎朝の生成ジョブ。
+# 収集 → Claude が台本と記事を生成 → 承認 Issue を作成し、状態をコミットする。
+# 人間の作業はこの Issue にコメントするだけ（docs/PHONE_OPS.md）。
+name: daily-generate
+
+on:
+  schedule:
+    # 21:00 UTC = 翌 06:00 JST。止めたいときはこの schedule をコメントアウトする。
+    - cron: '0 21 * * *'
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: '生成する件数'
+        required: false
+        default: '5'
+      sample:
+        description: 'サンプルデータで動かす（true/false）'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write   # 承認キューの状態をコミットするため
+  issues: write     # 承認 Issue を作るため
+
+concurrency:
+  group: pipeline-state
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: 依存をインストール
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: ffmpeg と日本語フォントをインストール
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-noto-cjk
+
+      - name: 生成して承認 Issue を作成
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          AFF_HUB_URL: ${{ secrets.AFF_HUB_URL }}
+          AFF_PRODUCT_URL: ${{ secrets.AFF_PRODUCT_URL }}
+          AFF_ACCOUNTING_SOFT: ${{ secrets.AFF_ACCOUNTING_SOFT }}
+          AFF_TAX_ADVISOR: ${{ secrets.AFF_TAX_ADVISOR }}
+          AFF_FURUSATO: ${{ secrets.AFF_FURUSATO }}
+          AFF_SECURITIES: ${{ secrets.AFF_SECURITIES }}
+          AFF_INSURANCE: ${{ secrets.AFF_INSURANCE }}
+        run: |
+          SAMPLE_FLAG=""
+          if [ "${{ inputs.sample }}" = "true" ]; then SAMPLE_FLAG="--sample"; fi
+          python -m src.pipeline run \
+            --limit "${{ inputs.limit || '5' }}" \
+            --open-issue $SAMPLE_FLAG
+
+      - name: 承認キューの状態をコミット
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add -A data/
+          if git diff --cached --quiet; then
+            echo "変更なし"
+          else
+            git commit -m "chore: 承認キューを更新 ($(date -u +%Y-%m-%d))"
+            git push
+          fi

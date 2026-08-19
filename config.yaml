@@ -1,11 +1,16 @@
 # パイプラインの動作設定（コードを変更せずここで調整）
+#
+# ニッチ選定の根拠は docs/PLAYBOOK.md の「3. ニッチ選定」を参照。
+# 収益設計の要点: アフィリエイト・ファースト（プラットフォーム収益は後乗り）。
 
 collection:
   # X API の検索クエリ。lang:ja で日本語、-is:retweet でRT除外。
-  # 炎上・税金に関するトピックを対象にする。
+  # お金・税金・制度に絞る（高単価アフィリが存在し、ネタが制度改正で自動供給される）。
   queries:
-    enjou: '(炎上 OR 批判殺到 OR 謝罪) lang:ja -is:retweet'
-    tax:   '(増税 OR 減税 OR 税金 OR 確定申告 OR インボイス) lang:ja -is:retweet'
+    tax:              '(確定申告 OR インボイス OR 消費税 OR 所得税 OR 年末調整) lang:ja -is:retweet'
+    subsidy:          '(補助金 OR 給付金 OR 助成金 OR 支援金) lang:ja -is:retweet'
+    social_insurance: '(年金 OR 社会保険 OR 扶養 OR 健康保険料) lang:ja -is:retweet'
+    household:        '(ふるさと納税 OR NISA OR 節税 OR 家計) lang:ja -is:retweet'
   max_results_per_query: 25   # X API の recent search は 10-100
   min_likes: 100              # ノイズ除去のための最低いいね数
   min_retweets: 20
@@ -27,11 +32,65 @@ safety:
   # 収集元として信頼するアカウント種別（優先）
   prefer_verified_sources: true
 
+llm:
+  # 台本・記事の生成に使うモデル。未設定の ANTHROPIC_API_KEY 時はテンプレにフォールバック。
+  model: 'claude-opus-5'
+  effort: 'medium'        # low | medium | high | xhigh | max
+  max_tokens: 8000
+  # 断定を避け、出典と免責を必ず付けさせるための方針（システムプロンプトに合成される）
+  editorial_policy: |
+    - 税務・投資の断定的な助言はしない。「一般的な制度の説明」に留める。
+    - 個人・企業を名指しして批判しない。
+    - 数値や期限は出典が確認できるものだけ書く。不確かなら「要確認」と明示する。
+    - 視聴者の行動が変わる論点を1つに絞る。網羅より1点突破。
+
+monetization:
+  # 収益の主軸。プラットフォーム収益は閾値が高いので「後からついてくるボーナス」扱い。
+  primary: 'affiliate'
+  # ステマ規制（景品表示法, 2023年10月〜）対応。アフィリリンクを含む成果物に必ず付与。
+  disclosure: '※本投稿にはアフィリエイトリンクを含みます（PR）'
+  # 免責。税務・投資テーマでは必須。
+  liability_note: '※一般的な制度の解説です。個別の判断は必ず一次情報および専門家にご確認ください。'
+  # プロフィールに置くリンク集約ページ。動画の説明文からはここへ誘導する。
+  hub_url_slot: 'AFF_HUB_URL'
+  # 自前デジタル商品（note / Tips / BASE）。Phase 3 で使う。
+  product_url_slot: 'AFF_PRODUCT_URL'
+  # 実リンクはリポジトリに書かず、環境変数（GitHub Secrets）から注入する。
+  # slot が空の環境変数を指している案件はスキップされる。
+  offers:
+    tax:
+      - slot: 'AFF_ACCOUNTING_SOFT'
+        label: '確定申告ソフト'
+        cta: '申告書の作成を自動化するなら'
+      - slot: 'AFF_TAX_ADVISOR'
+        label: '税理士紹介'
+        cta: '判断に迷う論点は専門家に確認するのが安全'
+    subsidy:
+      - slot: 'AFF_ACCOUNTING_SOFT'
+        label: '会計ソフト'
+        cta: '申請に必要な帳簿を揃えるなら'
+      - slot: 'AFF_TAX_ADVISOR'
+        label: '専門家紹介'
+        cta: '申請要件の判断に迷うなら'
+    social_insurance:
+      - slot: 'AFF_INSURANCE'
+        label: '保険の無料相談'
+        cta: '公的保障で足りない部分を確認するなら'
+    household:
+      - slot: 'AFF_FURUSATO'
+        label: 'ふるさと納税サイト'
+        cta: '控除上限のシミュレーションはこちら'
+      - slot: 'AFF_SECURITIES'
+        label: '証券口座'
+        cta: 'NISA枠を使い始めるなら'
+
 video:
   width: 1080
   height: 1920        # 縦型 9:16 (TikTok)
-  max_duration_sec: 55
-  slides_per_video: 5
+  # TikTok Creator Rewards は「1分以上」の動画のみ対象。60未満にすると収益対象外になる。
+  min_duration_sec: 62
+  max_duration_sec: 90
+  slides_per_video: 6
   background_color: '#0f172a'
   text_color: '#f8fafc'
   accent_color: '#38bdf8'
@@ -44,4 +103,12 @@ publishing:
   disable_duet: false
   disable_stitch: false
   # ハッシュタグ（動画説明に付与）
-  hashtags: ['#ニュース', '#解説', '#時事']
+  hashtags: ['#お金の話', '#税金', '#確定申告', '#節税', '#解説']
+
+approval:
+  # 承認 Issue のラベル。ワークフローの起動条件に使う。
+  label: 'approval-queue'
+  # safety_flags 付きの案件を `/approve all` の対象から外す（安全装置）
+  exclude_flagged_from_bulk: true
+  # 1 通の Issue に載せる最大件数（通勤中に読める量に抑える）
+  max_items_per_issue: 5

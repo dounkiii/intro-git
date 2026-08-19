@@ -1,0 +1,38 @@
+# 週次レポート。「回っているつもりで何も生んでいない」状態を検知するためのジョブ。
+# 投稿数 / 承認率 / 収益を Issue に出す。2週連続で数字が動かなければ
+# ニッチか CTA を見直す（docs/PLAYBOOK.md の 3 と 8）。
+name: weekly-report
+
+on:
+  schedule:
+    # 月曜 22:00 UTC = 火曜 07:00 JST
+    - cron: '0 22 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: 依存をインストール
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: レポートを Issue として投稿
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          python -m src.pipeline report --days 7 \
+            --issue-title "週次レポート $(date -u +%Y-%m-%d)"

@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 OUTPUT_DIR = DATA_DIR / "output"
 REVIEW_DIR = DATA_DIR / "review_queue"
+ARTICLE_DIR = DATA_DIR / "articles"
 
 
 def _bool_env(name: str, default: bool) -> bool:
@@ -40,7 +41,11 @@ class Config:
     # secrets
     x_bearer_token: str = ""
     tiktok_access_token: str = ""
-    openai_api_key: str = ""
+    anthropic_api_key: str = ""
+
+    # GitHub（承認 Issue の作成・更新に使う。Actions 内では自動で入る）
+    github_token: str = ""
+    github_repository: str = ""
 
     # safety switches
     dry_run: bool = True
@@ -55,15 +60,31 @@ class Config:
 
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         REVIEW_DIR.mkdir(parents=True, exist_ok=True)
+        ARTICLE_DIR.mkdir(parents=True, exist_ok=True)
 
         return cls(
             raw=raw,
             x_bearer_token=os.getenv("X_BEARER_TOKEN", ""),
             tiktok_access_token=os.getenv("TIKTOK_ACCESS_TOKEN", ""),
-            openai_api_key=os.getenv("OPENAI_API_KEY", ""),
+            anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
+            github_token=os.getenv("GITHUB_TOKEN", ""),
+            github_repository=os.getenv("GITHUB_REPOSITORY", ""),
             dry_run=_bool_env("DRY_RUN", True),
             review_required=_bool_env("REVIEW_REQUIRED", True),
         )
 
     def section(self, name: str) -> dict[str, Any]:
         return self.raw.get(name, {}) or {}
+
+    def llm_client(self):
+        """設定に従った ClaudeClient を返す。キー未設定でも生成し、呼び出し側は
+        `available` を見てテンプレ生成にフォールバックする。"""
+        from .llm import ClaudeClient
+
+        llm = self.section("llm")
+        return ClaudeClient(
+            api_key=self.anthropic_api_key,
+            model=llm.get("model", "claude-opus-5"),
+            effort=llm.get("effort", "medium"),
+            max_tokens=int(llm.get("max_tokens", 8000)),
+        )

@@ -1,9 +1,14 @@
 """パイプライン全体のオーケストレーションと CLI。
 
+設計の中心は「生産は全自動、承認だけ人間」。詳細は docs/PLAYBOOK.md。
+
 サブコマンド:
-  run       収集→分類→安全性→スクリプト→動画→レビューキュー投入
+  run       収集→分類→安全性→Claudeで台本と記事→動画→レビュー投入→承認Issue作成
   review    レビューキューの一覧 / 承認 / 却下
-  publish   承認済みアイテムを TikTok へ投稿
+  command   Issue コメント（/approve 等）を処理する（GitHub Actions から呼ぶ）
+  publish   承認済みアイテムを TikTok へ投稿し、記事を書き出す
+  report    週次レポートを出力
+  revenue   発生した収益を記録
 """
 from __future__ import annotations
 
@@ -11,14 +16,22 @@ import argparse
 import logging
 from pathlib import Path
 
-from .config import Config, OUTPUT_DIR
+from .config import ARTICLE_DIR, Config, OUTPUT_DIR
 from .collectors.twitter import TwitterCollector
+from .models import Article, VideoScript
+from .monetize.revenue import RevenueLog
 from .processing.classifier import Classifier
 from .processing.safety import SafetyChecker
 from .processing.summarizer import Summarizer
-from .video.builder import VideoBuilder
+from .publishers.github_issue import (
+    Command,
+    GitHubIssueSurface,
+    parse_commands,
+    render_approval_issue,
+)
 from .publishers.review_queue import ReviewQueue
 from .publishers.tiktok import TikTokPublisher
+from .video.builder import VideoBuilder
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("pipeline")
@@ -34,45 +47,190 @@ class Pipeline:
         self.video = VideoBuilder(self.config)
         self.queue = ReviewQueue()
         self.publisher = TikTokPublisher(self.config)
+        self.issues = GitHubIssueSurface(self.config)
+        self.revenue = RevenueLog()
+        approval = self.config.section("approval")
+        self.exclude_flagged = bool(approval.get("exclude_flagged_from_bulk", True))
+        self.max_items_per_issue = int(approval.get("max_items_per_issue", 5))
 
-    def run(self, limit: int = 10, use_sample: bool | None = None) -> list[str]:
-        """収集から動画生成・レビュー投入まで。生成した item_id のリストを返す。"""
+    # ------------------------------------------------------------------
+    def run(self, limit: int | None = None, use_sample: bool | None = None,
+            open_issue: bool = False) -> list[str]:
+        """収集から承認キュー投入まで。生成した item_id のリストを返す。"""
+        limit = limit if limit is not None else self.max_items_per_issue
+
         collected = self.collector.collect(use_sample=use_sample)
         topics = self.classifier.build_topics(collected)
         topics = self.safety.filter_topics(topics)[:limit]
 
+        if not self.summarizer.llm.available:
+            logger.warning("ANTHROPIC_API_KEY が未設定のため、テンプレ生成で動作します。"
+                           "文章の品質は上がりません。")
+
         item_ids: list[str] = []
+        cards: list[tuple] = []
         for topic in topics:
             script = self.summarizer.build_script(topic)
+            article = self.summarizer.build_article(topic, script)
+
             item_id = f"{topic.category}-{topic.tweets[0].id}"
-            out_path = OUTPUT_DIR / f"{item_id}.mp4"
-            video_path = self.video.build(script, out_path)
-            self.queue.enqueue(item_id, script, video_path, topic.safety_flags)
+            video_path = self.video.build(script, OUTPUT_DIR / f"{item_id}.mp4")
+            item = self.queue.enqueue(item_id, script, video_path,
+                                      topic.safety_flags, category=topic.category,
+                                      article=article)
             item_ids.append(item_id)
+            cards.append((item, article.to_dict()))
+
+        if open_issue:
+            self._open_approval_issue(cards)
 
         logger.info("run 完了: %d 件をレビューキューに投入", len(item_ids))
         return item_ids
 
+    def _open_approval_issue(self, cards: list[tuple]) -> None:
+        from datetime import date
+
+        title = f"承認キュー {date.today().isoformat()}（{len(cards)}件）"
+        body = render_approval_issue(cards)
+        self.issues.create_issue(title, body)
+
+    # ------------------------------------------------------------------
+    def handle_comment(self, comment_body: str, issue_number: int | None = None) -> str:
+        """Issue コメントのコマンドを処理し、返信用の Markdown を返す。"""
+        commands = parse_commands(comment_body)
+        if not commands:
+            return ""
+
+        replies: list[str] = []
+        for cmd in commands:
+            replies.append(self._run_command(cmd))
+
+        reply = "\n".join(r for r in replies if r)
+        if reply and issue_number is not None:
+            self.issues.comment(issue_number, reply)
+        return reply
+
+    def _run_command(self, cmd: Command) -> str:
+        if cmd.action == "status":
+            return self._render_status()
+
+        if cmd.action == "revenue":
+            try:
+                amount = int(float(cmd.target))
+            except ValueError:
+                return f"⚠️ 金額を数値で指定してください: `/revenue 3200 A8 案件名`（受け取った値: `{cmd.target}`）"
+            source, _, note = cmd.note.partition(" ")
+            self.revenue.log_revenue(amount, source or "unknown", note.strip())
+            return f"✅ 収益 {amount:,}円 を記録しました（source={source or 'unknown'}）"
+
+        if cmd.action == "approve" and cmd.target.lower() == "all":
+            approved, skipped = self.queue.approve_all(self.exclude_flagged)
+            for item_id in approved:
+                self._log_status(item_id, "approved")
+            lines = [f"✅ {len(approved)}件を承認しました。"]
+            if approved:
+                lines.append("　" + ", ".join(f"`{i}`" for i in approved))
+            if skipped:
+                lines.append(f"⚠️ safety_flags 付きの {len(skipped)}件は一括承認から除外しました。"
+                             "個別に確認してください:")
+                lines.append("　" + ", ".join(f"`{i}`" for i in skipped))
+            return "\n".join(lines)
+
+        item = self.queue.get(cmd.target)
+        if item is None:
+            return f"⚠️ `{cmd.target}` が見つかりません。`/status` でキューを確認してください。"
+
+        if cmd.action == "approve":
+            self.queue.approve(cmd.target)
+            self._log_status(cmd.target, "approved")
+            return f"✅ `{cmd.target}` を承認しました。次の publish で投稿されます。"
+
+        self.queue.reject(cmd.target, cmd.note)
+        self._log_status(cmd.target, "rejected")
+        reason = f"（理由: {cmd.note}）" if cmd.note else ""
+        return f"🚫 `{cmd.target}` を却下しました{reason}"
+
+    def _render_status(self) -> str:
+        lines = ["## キュー状況", ""]
+        for status in ("pending", "approved", "rejected", "published"):
+            items = self.queue.list_items(status=status)
+            lines.append(f"- **{status}**: {len(items)}件")
+            for item in items[:10]:
+                flag = " ⚠️" if item.flagged else ""
+                lines.append(f"  - `{item.id}`{flag} {item.script.get('title', '')}")
+        return "\n".join(lines)
+
+    def _log_status(self, item_id: str, status: str) -> None:
+        item = self.queue.get(item_id)
+        if item is None:
+            return
+        self.revenue.log_post(
+            item_id=item_id,
+            category=item.category,
+            channel="-",
+            status=status,
+            route=item.article.get("monetization_route", "なし"),
+            title=item.script.get("title", ""),
+        )
+
+    # ------------------------------------------------------------------
     def publish_approved(self) -> list[dict]:
-        """承認済みアイテムを投稿。REVIEW_REQUIRED=false なら pending も対象。"""
+        """承認済みアイテムを投稿し、記事を書き出す。
+
+        REVIEW_REQUIRED=false なら pending も対象になるが、既定では承認必須。
+        """
         statuses = ["approved"] if self.config.review_required else ["approved", "pending"]
         results: list[dict] = []
+
         for status in statuses:
             for item in self.queue.list_items(status=status):
-                video_path = Path(item.video_path)
-                from .models import VideoScript
                 script = VideoScript(**item.script)
+                video_path = self._ensure_video(item.id, item.video_path, script)
                 result = self.publisher.publish(video_path, script)
-                results.append({"id": item.id, "result": result})
+
+                article_path = ""
+                if item.article:
+                    article_path = str(self._write_article(item.id, Article(**item.article)))
+
+                results.append({"id": item.id, "tiktok": result, "article": article_path})
                 if not self.config.dry_run:
                     self.queue.set_status(item.id, "published")
+                    self.revenue.log_post(
+                        item_id=item.id, category=item.category, channel="tiktok+article",
+                        status="published",
+                        route=item.article.get("monetization_route", "なし"),
+                        title=item.script.get("title", ""),
+                    )
+
         logger.info("publish 完了: %d 件", len(results))
         return results
+
+    def _ensure_video(self, item_id: str, video_path: str, script: VideoScript) -> Path:
+        """動画ファイルが無ければ台本から作り直す。
+
+        GitHub Actions のランナーは実行ごとに破棄されるため、生成ジョブと投稿ジョブは
+        別のマシンで走る。リポジトリにコミットするのは台本 JSON（軽い）だけにして、
+        動画（重い）は投稿時に台本から再生成する。
+        """
+        path = Path(video_path) if video_path else OUTPUT_DIR / f"{item_id}.mp4"
+        if path.exists():
+            return path
+        logger.info("動画が見つかりません（%s）。台本から再生成します。", path)
+        return self.video.build(script, OUTPUT_DIR / f"{item_id}.mp4")
+
+    @staticmethod
+    def _write_article(item_id: str, article: Article) -> Path:
+        """記事を Markdown として書き出す。note / ブログへはここから貼る。"""
+        ARTICLE_DIR.mkdir(parents=True, exist_ok=True)
+        path = ARTICLE_DIR / f"{item_id}.md"
+        path.write_text(f"# {article.title}\n\n{article.body_markdown}\n", encoding="utf-8")
+        logger.info("記事を書き出しました: %s", path)
+        return path
 
 
 # ---------------------------------------------------------------------------
 def _cmd_run(args) -> None:
-    Pipeline().run(limit=args.limit, use_sample=args.sample)
+    Pipeline().run(limit=args.limit, use_sample=args.sample, open_issue=args.open_issue)
 
 
 def _cmd_review(args) -> None:
@@ -87,22 +245,46 @@ def _cmd_review(args) -> None:
             print("（キューは空です）")
         for it in items:
             flags = ",".join(it.safety_flags) or "-"
-            print(f"[{it.status}] {it.id}  flags={flags}")
+            route = it.article.get("monetization_route", "なし")
+            print(f"[{it.status}] {it.id}  flags={flags}  route={route}")
             print(f"    title: {it.script.get('title')}")
             print(f"    video: {it.video_path}")
+
+
+def _cmd_command(args) -> None:
+    body = args.body
+    if not body and args.body_file:
+        body = Path(args.body_file).read_text(encoding="utf-8")
+    reply = Pipeline().handle_comment(body or "", args.issue)
+    print(reply or "（処理対象のコマンドはありませんでした）")
 
 
 def _cmd_publish(args) -> None:
     Pipeline().publish_approved()
 
 
+def _cmd_report(args) -> None:
+    report = RevenueLog().render_report(days=args.days)
+    print(report)
+    if args.issue_title:
+        GitHubIssueSurface(Config.load()).create_issue(args.issue_title, report)
+
+
+def _cmd_revenue(args) -> None:
+    RevenueLog().log_revenue(args.amount, args.source, args.note)
+    print(f"記録しました: {args.amount:,}円 / {args.source}")
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="pipeline", description="Twitter→TikTok 自動化")
+    parser = argparse.ArgumentParser(
+        prog="pipeline", description="スマホ承認型 AI 収益パイプライン"
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_run = sub.add_parser("run", help="収集〜動画生成〜レビュー投入")
-    p_run.add_argument("--limit", type=int, default=10)
+    p_run = sub.add_parser("run", help="収集〜台本/記事/動画生成〜承認キュー投入")
+    p_run.add_argument("--limit", type=int, default=None)
     p_run.add_argument("--sample", action="store_true", help="サンプルデータで実行")
+    p_run.add_argument("--open-issue", action="store_true", help="承認 Issue を作成する")
     p_run.set_defaults(func=_cmd_run)
 
     p_rev = sub.add_parser("review", help="レビューキュー操作")
@@ -112,9 +294,26 @@ def build_parser() -> argparse.ArgumentParser:
     p_rev.add_argument("--reject", metavar="ITEM_ID")
     p_rev.set_defaults(func=_cmd_review)
 
-    p_pub = sub.add_parser("publish", help="承認済みを TikTok へ投稿")
+    p_cmd = sub.add_parser("command", help="Issue コメントのコマンドを処理")
+    p_cmd.add_argument("--body", default="", help="コメント本文")
+    p_cmd.add_argument("--body-file", default="", help="コメント本文を含むファイル")
+    p_cmd.add_argument("--issue", type=int, default=None, help="返信先 Issue 番号")
+    p_cmd.set_defaults(func=_cmd_command)
+
+    p_pub = sub.add_parser("publish", help="承認済みを投稿し記事を書き出す")
     p_pub.add_argument("--approved", action="store_true")
     p_pub.set_defaults(func=_cmd_publish)
+
+    p_rep = sub.add_parser("report", help="週次レポートを出力")
+    p_rep.add_argument("--days", type=int, default=7)
+    p_rep.add_argument("--issue-title", default="", help="指定すると Issue として投稿する")
+    p_rep.set_defaults(func=_cmd_report)
+
+    p_money = sub.add_parser("revenue", help="発生した収益を記録")
+    p_money.add_argument("--amount", type=int, required=True, help="金額（円）")
+    p_money.add_argument("--source", required=True, help="ASP名など")
+    p_money.add_argument("--note", default="")
+    p_money.set_defaults(func=_cmd_revenue)
 
     return parser
 

@@ -1,0 +1,85 @@
+# 承認コメントを処理するジョブ。スマホからの `/approve` で起動する。
+#
+# 起動条件を絞っている理由:
+#   - approval-queue ラベルの付いた Issue のみ（無関係な Issue で動かさない）
+#   - コメントが `/` で始まるものだけ（雑談で起動しない）
+#   - コメント投稿者がリポジトリのオーナー/メンバーのみ（第三者が投稿を承認できないように）
+name: approve-command
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: pipeline-state
+  cancel-in-progress: false
+
+jobs:
+  handle:
+    if: >-
+      contains(github.event.issue.labels.*.name, 'approval-queue') &&
+      startsWith(github.event.comment.body, '/') &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: 依存をインストール
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: ffmpeg と日本語フォントをインストール
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-noto-cjk
+
+      # コメント本文はシェルに直接展開せずファイル経由で渡す（インジェクション対策）
+      - name: コメント本文をファイルに書き出す
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: printf '%s' "$COMMENT_BODY" > /tmp/comment.txt
+
+      - name: コマンドを処理
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          python -m src.pipeline command \
+            --body-file /tmp/comment.txt \
+            --issue "${{ github.event.issue.number }}"
+
+      - name: 承認済みを投稿
+        env:
+          TIKTOK_ACCESS_TOKEN: ${{ secrets.TIKTOK_ACCESS_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          # TikTok アプリの審査が通り、実投稿してよくなったら Secrets/Variables で
+          # DRY_RUN=false にする。既定は true（ファイル出力のみ）。
+          DRY_RUN: ${{ vars.DRY_RUN || 'true' }}
+          REVIEW_REQUIRED: 'true'
+          AFF_HUB_URL: ${{ secrets.AFF_HUB_URL }}
+          AFF_PRODUCT_URL: ${{ secrets.AFF_PRODUCT_URL }}
+        run: python -m src.pipeline publish --approved
+
+      - name: 状態をコミット
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git pull --rebase --autostash origin "${{ github.event.repository.default_branch }}" || true
+          git add -A data/
+          if git diff --cached --quiet; then
+            echo "変更なし"
+          else
+            git commit -m "chore: 承認結果を反映 (issue #${{ github.event.issue.number }})"
+            git push
+          fi

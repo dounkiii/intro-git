@@ -2,12 +2,16 @@
 __pycache__/
 *.pyc
 .env
+.pytest_cache/
+.DS_Store
+
+# --- 生成される重いメディアはコミットしない（投稿時に台本から再生成する） ---
 data/output/*.mp4
 data/output/*.mp3
 data/output/*.png
-data/output/*.json
-data/review_queue/*.json
-!data/review_queue/.gitkeep
-!data/output/.gitkeep
-.pytest_cache/
-.DS_Store
+data/output/*.storyboard.json
+
+# --- 状態ファイルは意図的にコミットする ---
+# GitHub Actions のランナーは実行ごとに破棄されるため、承認キューと各種ログを
+# リポジトリに残すことで「生成ジョブ → 承認 → 投稿ジョブ」を跨いで状態を引き継ぐ。
+# （data/review_queue/*.json, data/articles/*.md, data/posts.csv, data/revenue.csv）

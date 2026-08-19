@@ -33,7 +33,9 @@ class VideoBuilder:
         self.fg = v.get("text_color", "#f8fafc")
         self.accent = v.get("accent_color", "#38bdf8")
         self.tts_lang = v.get("tts_lang", "ja")
-        self.max_duration = int(v.get("max_duration_sec", 55))
+        # TikTok Creator Rewards の対象は1分以上の動画。これを下回ると収益化されない。
+        self.min_duration = int(v.get("min_duration_sec", 62))
+        self.max_duration = int(v.get("max_duration_sec", 90))
 
     def build(self, script: VideoScript, out_path: Path) -> Path:
         """動画を生成して out_path (mp4) を返す。失敗時は storyboard(json) を返す。"""
@@ -58,8 +60,10 @@ class VideoBuilder:
 
         with tempfile.TemporaryDirectory() as tmp:
             tmpdir = Path(tmp)
-            concat_lines: list[str] = []
-
+            # まず各スライドの画像と音声を作り、尺を確定させる。
+            # 合計尺が min_duration に届かない場合は最後のスライドを延長する
+            # （1分未満だと TikTok Creator Rewards の対象外になるため）。
+            prepared: list[tuple[Path, Path | None, float]] = []
             for i, (slide, narration) in enumerate(
                 zip(script.slides, script.narration)
             ):
@@ -68,13 +72,18 @@ class VideoBuilder:
 
                 # 音声（無ければ無音3秒）
                 dur = 3.0
-                audio_path = tmpdir / f"audio_{i:02d}.mp3"
+                audio_path: Path | None = tmpdir / f"audio_{i:02d}.mp3"
                 if gTTS is not None:
                     gTTS(text=narration, lang=self.tts_lang).save(str(audio_path))
                     dur = self._audio_duration(audio_path)
                 else:
-                    audio_path = None  # type: ignore
+                    audio_path = None
+                prepared.append((img_path, audio_path, dur))
 
+            prepared = self._fit_duration(prepared)
+
+            concat_lines: list[str] = []
+            for i, (img_path, audio_path, dur) in enumerate(prepared):
                 clip_path = tmpdir / f"clip_{i:02d}.mp4"
                 self._make_clip(img_path, audio_path, dur, clip_path)
                 concat_lines.append(f"file '{clip_path.as_posix()}'")
@@ -90,6 +99,29 @@ class VideoBuilder:
             )
         logger.info("動画を生成しました: %s", out_path)
         return out_path
+
+    def _fit_duration(self, prepared: list[tuple[Path, Path | None, float]]
+                      ) -> list[tuple[Path, Path | None, float]]:
+        """合計尺を [min_duration, max_duration] に寄せる。
+
+        不足分は最終スライドを延長して埋める（尺稼ぎのために内容を薄めるのではなく、
+        まとめスライドの表示時間を伸ばす）。超過している場合は警告のみ出す。
+        """
+        if not prepared:
+            return prepared
+
+        total = sum(d for _, _, d in prepared)
+        if total < self.min_duration:
+            deficit = self.min_duration - total
+            img, audio, dur = prepared[-1]
+            prepared[-1] = (img, audio, dur + deficit)
+            logger.info("合計尺 %.1f秒 → %.1f秒に延長しました（min_duration_sec=%d）",
+                        total, total + deficit, self.min_duration)
+        elif total > self.max_duration:
+            logger.warning("合計尺が %.1f秒で max_duration_sec=%d を超えています。"
+                           "narration を短くするか slides_per_video を減らしてください。",
+                           total, self.max_duration)
+        return prepared
 
     def _draw_slide(self, path: Path, text: str, index: int,
                     Image, ImageDraw, ImageFont) -> None:

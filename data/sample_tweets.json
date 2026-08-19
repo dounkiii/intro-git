@@ -1,32 +1,8 @@
 {
-  "enjou": [
-    {
-      "id": "sample-e1",
-      "text": "大手飲食チェーンの新CMが不適切だと批判殺到。企業は公式サイトで謝罪コメントを発表しました。#炎上",
-      "author": "news_sample_a",
-      "author_verified": true,
-      "likes": 5200,
-      "retweets": 1800,
-      "replies": 640,
-      "created_at": "2026-07-22T09:00:00Z",
-      "url": "https://twitter.com/i/web/status/sample-e1"
-    },
-    {
-      "id": "sample-e2",
-      "text": "あるゲーム会社のアップデートが改悪だとユーザーから批判が集中。運営が仕様を一部撤回すると発表しました。",
-      "author": "game_media_sample",
-      "author_verified": true,
-      "likes": 3100,
-      "retweets": 950,
-      "replies": 410,
-      "created_at": "2026-07-22T11:30:00Z",
-      "url": "https://twitter.com/i/web/status/sample-e2"
-    }
-  ],
   "tax": [
     {
       "id": "sample-t1",
-      "text": "来年度の税制改正案が公表。所得控除の見直しで手取りがどう変わるか、専門家が解説しています。#税金 #増税",
+      "text": "来年度の税制改正案が公表。所得控除の見直しで手取りがどう変わるか、専門家が解説しています。#税金",
       "author": "gov_econ_sample",
       "author_verified": true,
       "likes": 8800,
@@ -45,6 +21,58 @@
       "replies": 300,
       "created_at": "2026-07-23T07:15:00Z",
       "url": "https://twitter.com/i/web/status/sample-t2"
+    }
+  ],
+  "subsidy": [
+    {
+      "id": "sample-s1",
+      "text": "小規模事業者向けの補助金、次回公募の受付開始日が発表されました。申請枠と必要書類が前回から変更されています。",
+      "author": "smallbiz_support_sample",
+      "author_verified": true,
+      "likes": 1900,
+      "retweets": 880,
+      "replies": 210,
+      "created_at": "2026-07-24T09:00:00Z",
+      "url": "https://twitter.com/i/web/status/sample-s1"
+    }
+  ],
+  "social_insurance": [
+    {
+      "id": "sample-i1",
+      "text": "社会保険の加入対象が拡大される見込み。パート・アルバイトの働き方にどう影響するかが論点になっています。",
+      "author": "hr_media_sample",
+      "author_verified": true,
+      "likes": 3300,
+      "retweets": 1500,
+      "replies": 470,
+      "created_at": "2026-07-24T10:30:00Z",
+      "url": "https://twitter.com/i/web/status/sample-i1"
+    }
+  ],
+  "household": [
+    {
+      "id": "sample-h1",
+      "text": "ふるさと納税の控除上限は年収だけでは決まりません。共働きか、扶養家族がいるかで大きく変わります。",
+      "author": "household_money_sample",
+      "author_verified": true,
+      "likes": 4100,
+      "retweets": 1600,
+      "replies": 380,
+      "created_at": "2026-07-25T12:00:00Z",
+      "url": "https://twitter.com/i/web/status/sample-h1"
+    }
+  ],
+  "enjou": [
+    {
+      "id": "sample-e1",
+      "text": "大手飲食チェーンの新CMが不適切だと批判殺到。企業は公式サイトで謝罪コメントを発表しました。#炎上",
+      "author": "news_sample_a",
+      "author_verified": true,
+      "likes": 5200,
+      "retweets": 1800,
+      "replies": 640,
+      "created_at": "2026-07-22T09:00:00Z",
+      "url": "https://twitter.com/i/web/status/sample-e1"
     }
   ]
 }
