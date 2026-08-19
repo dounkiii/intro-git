@@ -19,9 +19,15 @@ from .evidence import EvidenceSet
 # 換金の準備度。「AFF_* が無い = 金にならない」と学習させないための3値。
 # GPT からの指摘（採用）: AFF_* の有無だけで production_fit を決めると、
 # すでに案件を持っている市場ばかり探索するシステムになり、新しい市場を発見できなくなる。
-MONETIZATION_IMMEDIATE = "immediate"   # 今すぐ AFF_* で売れる
-MONETIZATION_POTENTIAL = "potential"   # 案件は無いが商品・有料化の道がある
+MONETIZATION_IMMEDIATE = "immediate"   # 今すぐ AFF_* で売れる（実測）
+MONETIZATION_POTENTIAL = "potential"   # 案件は無いが商品・有料化の道がある（LLM推論）
 MONETIZATION_NONE = "none"             # 換金の道が見えない
+
+# 根拠の種類。observed > inferred の設計思想をここでも維持する。
+# 「LLM が稼げると言った」と「実際に案件が存在した」を同じ種類のデータとして扱わない。
+MONETIZATION_SOURCE_OBSERVED = "observed"    # AFF_* の実在を確認した
+MONETIZATION_SOURCE_INFERRED = "inferred"    # 調査結果からの推論
+MONETIZATION_SOURCE_NONE = "none"
 
 # exploit は immediate を重視し、explore は potential も評価する。
 MONETIZATION_WEIGHT = {
@@ -145,8 +151,11 @@ class Score:
 
     # 観測と推測の分離（src/scout/evidence.py）
     evidence: EvidenceSet = field(default_factory=EvidenceSet)
-    # 換金の準備度。config と AFF_* から実測し、無ければ調査結果から potential を判定する。
-    monetization_readiness: str = MONETIZATION_POTENTIAL
+    # 換金の根拠を種類ごとに分けて保存する。readiness は派生値。
+    # observed: AFF_* に案件が実在した（実測）
+    # inferred: 案件は無いが調査結果に収益化手段が挙がっていた（LLM推論）
+    monetization_observed: bool | None = None
+    monetization_inferred: bool | None = None
 
     conflicts: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
@@ -206,9 +215,29 @@ class Score:
                 + self.evidence.ratio("affiliate_fit")) / 2
 
     @property
+    def monetization_readiness(self) -> str:
+        """換金の準備度（派生値）。実測が推測に優先する。"""
+        if self.monetization_observed:
+            return MONETIZATION_IMMEDIATE
+        if self.monetization_inferred:
+            return MONETIZATION_POTENTIAL
+        if self.monetization_observed is None and self.monetization_inferred is None:
+            return MONETIZATION_POTENTIAL      # 未評価は中間として扱う
+        return MONETIZATION_NONE
+
+    @property
+    def monetization_source(self) -> str:
+        """readiness の根拠が実測か推論か。校正時に混ぜないための区別。"""
+        if self.monetization_observed:
+            return MONETIZATION_SOURCE_OBSERVED
+        if self.monetization_inferred:
+            return MONETIZATION_SOURCE_INFERRED
+        return MONETIZATION_SOURCE_NONE
+
+    @property
     def route_available(self) -> bool:
         """今すぐ換金できるか。表示と後方互換のための派生値。"""
-        return self.monetization_readiness == MONETIZATION_IMMEDIATE
+        return bool(self.monetization_observed)
 
     @property
     def production_fit(self) -> float:
@@ -247,7 +276,10 @@ class Score:
         d = {k: getattr(self, k) for k in RUBRIC}
         d.update(
             llm_verdict=self.llm_verdict, rationale=self.rationale, scored=self.scored,
+            monetization_observed=self.monetization_observed,
+            monetization_inferred=self.monetization_inferred,
             monetization_readiness=self.monetization_readiness,
+            monetization_source=self.monetization_source,
             route_available=self.route_available,
             speculative=self.speculative,
             speculative_rule_version=SPECULATIVE_RULE_VERSION,
@@ -266,6 +298,16 @@ class Score:
         data = data or {}
         fields = {k: v for k, v in data.items()
                   if k in cls.__dataclass_fields__ and k != "evidence"}
+
+        # 旧形式（monetization_readiness / route_available）の台帳も読めるようにする
+        if "monetization_observed" not in fields:
+            legacy = data.get("monetization_readiness")
+            if legacy is not None:
+                fields["monetization_observed"] = legacy == MONETIZATION_IMMEDIATE
+                fields["monetization_inferred"] = legacy == MONETIZATION_POTENTIAL
+            elif "route_available" in data:
+                fields["monetization_observed"] = bool(data["route_available"])
+
         score = cls(**fields)
         restored = EvidenceSet.from_dict(data.get("evidence"))
         if restored.items:

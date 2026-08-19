@@ -160,7 +160,8 @@ class Scorer:
         self._observe_competition(score, research)
         self._observe_growth(score, candidate, times_seen)
         self._observe_reliability(score, research)
-        score.monetization_readiness = self._monetization_readiness(candidate, research)
+        score.monetization_observed = self._has_affiliate_route(candidate)
+        score.monetization_inferred = self._has_inferred_potential(research)
 
     def _observe_competition(self, score: Score, research: Research) -> None:
         """SERP の守備力から「競合の少なさ」を実測で置き換える。"""
@@ -225,27 +226,29 @@ class Scorer:
     POTENTIAL_HINTS = ("有料", "販売", "商品", "サービス", "SaaS", "ツール", "講座",
                        "テンプレート", "リード", "見積", "相談", "比較", "note", "案件")
 
-    def _monetization_readiness(self, candidate: Candidate, research: Research) -> str:
-        """換金の準備度を3値で実測する。
+    def _has_affiliate_route(self, candidate: Candidate) -> bool:
+        """**実測**: 自前の AFF_* に案件が実在するか。
 
-        `immediate` は自前の AFF_* から実測。無い場合でも、調査結果に具体的な
-        収益化手段や商品が挙がっていれば `potential` とする。
-        **「AFF_* が無い = 金にならない」と学習させないための構造**（GPT提案④）。
-        exploit は immediate を、explore は potential も評価する。
+        `observed` 側。ここだけが「実際に案件が存在した」という事実。
         """
         if self._affiliate is None:
             from ..monetize.affiliate import AffiliateEngine
 
             self._affiliate = AffiliateEngine(self.config)
 
-        for key in [*candidate.keywords, "default"]:
-            if self._affiliate.build(key).has_route:
-                return MONETIZATION_IMMEDIATE
+        return any(self._affiliate.build(key).has_route
+                   for key in [*candidate.keywords, "default"])
 
+    def _has_inferred_potential(self, research: Research) -> bool:
+        """**推論**: 案件が無くても収益化の道があると LLM が言っているか。
+
+        `inferred` 側。observed とは別のフィールドに保存し、Ledger でも
+        `monetization_source` として区別する。校正時に「LLM が稼げると言った」と
+        「実際に案件が存在した」を同じ種類のデータとして扱わないため。
+        """
         text = " ".join([*research.monetization_paths, research.best_product])
-        if research.monetization_paths or any(h in text for h in self.POTENTIAL_HINTS):
-            return MONETIZATION_POTENTIAL
-        return MONETIZATION_NONE
+        return bool(research.monetization_paths
+                    or any(h in text for h in self.POTENTIAL_HINTS))
 
     def _record_divergences(self, score: Score) -> None:
         """推測と実測のズレを矛盾として記録する（減点はしない）。"""

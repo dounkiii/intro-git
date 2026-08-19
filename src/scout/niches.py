@@ -41,6 +41,8 @@ class Niche:
     commitment: str = ADOPT
     creatives_tried: int = 0     # 同ニッチで試した切り口の数。撤退判断に使う
     level_reason: str = ""
+    # 診断中の原因（creative / funnel / offer）。立っている間は生成枠を増やさない。
+    diagnosing: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -49,18 +51,18 @@ class Niche:
             "monetization_paths": self.monetization_paths,
             "adopted_at": self.adopted_at, "active": self.active,
             "commitment": self.commitment, "creatives_tried": self.creatives_tried,
-            "level_reason": self.level_reason,
+            "level_reason": self.level_reason, "diagnosing": self.diagnosing,
         }
 
     @property
     def items_per_run(self) -> int:
-        """1回の生成で作る本数の上限。CHEAP_TEST は小さく、SCALE は大きく。"""
-        return budget_for(self.commitment).items_per_run
+        """1回の生成で作る本数の上限。診断中は増やさない。"""
+        return budget_for(self.commitment, self.diagnosing).items_per_run
 
     @property
     def test_posts(self) -> int:
         """このレベルで公開する上限（0 = 上限なし）。"""
-        return budget_for(self.commitment).test_posts
+        return budget_for(self.commitment, self.diagnosing).test_posts
 
 
 class NicheRegistry:
@@ -124,8 +126,9 @@ class NicheRegistry:
         logger.info("ニッチを採用しました: %s (%s / %s)", niche.slug, niche.label, commitment)
         return niche
 
-    def set_commitment(self, niche_slug: str, level: str, reason: str = "") -> Niche | None:
-        """投資レベルを更新する。EXIT なら無効化する。"""
+    def set_commitment(self, niche_slug: str, level: str, reason: str = "",
+                       diagnosing: str | None = None) -> Niche | None:
+        """投資レベルと診断中フラグを更新する。EXIT なら無効化する。"""
         niches = self.load()
         target = next((n for n in niches if n.slug == niche_slug), None)
         if target is None:
@@ -135,6 +138,10 @@ class NicheRegistry:
                         niche_slug, target.commitment, level, reason)
         target.commitment = level
         target.level_reason = reason
+        if diagnosing is not None and diagnosing != target.diagnosing:
+            logger.info("診断中フラグを更新: %s %r -> %r", niche_slug,
+                        target.diagnosing, diagnosing)
+            target.diagnosing = diagnosing
         if level in (EXIT, OBSERVE):
             target.active = False
         self.save(niches)

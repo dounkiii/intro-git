@@ -13,7 +13,7 @@ import logging
 from pathlib import Path
 
 from ..config import Config
-from .commitment import (ADOPT, CHEAP_TEST, EXIT, LABELS, budget_for,
+from .commitment import (ADOPT, CHEAP_TEST, EXIT, LABELS, OBSERVE, budget_for,
                          initial_level, next_level)
 from .explore import allocate, pick_speculative
 from .ledger import ExperimentLedger
@@ -149,6 +149,12 @@ class ScoutPipeline:
         reason = (f"機会{score.opportunity} / 確信{score.confidence:.2f} / "
                   f"判定{opportunity.verdict}")
 
+        # 人間が明示的に採用したものを OBSERVE（何もしない）に落とさない。
+        # OBSERVE は自動分類のためのレベルで、明示指示の下限は CHEAP_TEST。
+        if commitment == OBSERVE:
+            commitment = CHEAP_TEST
+            reason += "（スコアは低いが明示的な採用のため小さく試す）"
+
         niche = self.niches.adopt(opportunity, commitment=commitment, reason=reason)
         self.store.set_status(opportunity_id, "adopted")
 
@@ -232,14 +238,23 @@ class ScoutPipeline:
         # 実績から投資レベルを自動で遷移させる（推測では動かさない）
         transition = ""
         if niche:
-            level, why = next_level(niche.commitment, verdict.stage, verdict.decided,
-                                    metrics.revenue_jpy, metrics.posts, creatives)
-            if level != niche.commitment:
-                self.niches.set_commitment(niche_slug, level, why)
-                transition = (f"**投資レベル: {niche.commitment} → {level}"
-                              f"（{LABELS.get(level, '')}）** — {why}")
-            else:
-                transition = f"投資レベル: {niche.commitment} のまま — {why}"
+            level, why, diagnosing = next_level(
+                niche.commitment, verdict.stage, verdict.decided,
+                metrics.revenue_jpy, metrics.posts, creatives,
+                conversions=metrics.conversions,
+                revenue_events=self.ledger.revenue_events(niche_slug),
+                likely_cause=verdict.likely_cause,
+                scale_gate=self.config.section("scout").get("scale_gate"))
+            changed = level != niche.commitment or diagnosing != niche.diagnosing
+            if changed:
+                self.niches.set_commitment(niche_slug, level, why, diagnosing=diagnosing)
+            arrow = (f"{niche.commitment} → {level}" if level != niche.commitment
+                     else f"{level} のまま")
+            transition = f"**投資レベル: {arrow}（{LABELS.get(level, '')}）** — {why}"
+            if diagnosing:
+                budget = budget_for(level, diagnosing)
+                transition += (f"\n　🔧 診断中（{diagnosing}）のため生成枠は "
+                               f"{budget.items_per_run}本 に抑えられます")
 
         lines = [
             f"📊 `{niche_slug}` の実績を記録しました"

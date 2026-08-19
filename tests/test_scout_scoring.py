@@ -24,7 +24,7 @@ def _scorer() -> Scorer:
 def _high_score(**overrides) -> Score:
     base = dict(demand=18, low_competition=14, monetizability=18, trend_growth=14,
                 contentability=9, affiliate_fit=9, durability=4,
-                source_reliability=4, scored=True, monetization_readiness="immediate")
+                source_reliability=4, scored=True, monetization_observed=True)
     base.update(overrides)
     return Score(**base)
 
@@ -220,32 +220,23 @@ def test_確信が高ければ今すぐ狙うになる():
 # --- 合成スコア -------------------------------------------------------------
 def test_換金の準備度で収益スコアに段階が付く():
     """「AFF_* が無い = 金にならない」と学習させないための3値。"""
-    immediate = _high_score(monetization_readiness="immediate")
-    potential = _high_score(monetization_readiness="potential")
-    none = _high_score(monetization_readiness="none")
+    immediate = _high_score(monetization_observed=True)
+    potential = _high_score(monetization_observed=False, monetization_inferred=True)
+    none = _high_score(monetization_observed=False, monetization_inferred=False)
 
     assert immediate.business > potential.business > none.business
     assert none.business > 0          # ゼロにはしない（案件は後から開拓できる）
 
 
-def test_案件がなくても収益化の道があればpotentialになる():
-    scorer = _scorer()
-    research = _research()
-    research.monetization_paths = ["アフィリ記事", "有料note"]
-
-    readiness = scorer._monetization_readiness(
-        Candidate(title="t", keywords=["まだ案件のないニッチ"]), research)
-
-    assert readiness == "potential"
-
-
 def test_収益化の道が何も挙がらなければnoneになる():
     scorer = _scorer()
+    score = _high_score()
 
-    readiness = scorer._monetization_readiness(
-        Candidate(title="t", keywords=["まだ案件のないニッチ"]), _research())
+    scorer._observe(score, Candidate(title="t", keywords=["まだ案件のないニッチ"]),
+                    _research(), 1)
 
-    assert readiness == "none"
+    assert score.monetization_readiness == "none"
+    assert score.monetization_source == "none"
 
 
 def test_機会スコアは片方がゼロなら上がらない():
@@ -256,7 +247,7 @@ def test_機会スコアは片方がゼロなら上がらない():
     no_room = Score(demand=20, low_competition=0, trend_growth=0,
                     monetizability=20, affiliate_fit=10, contentability=10,
                     durability=5, source_reliability=5, scored=True,
-                    monetization_readiness="immediate")
+                    monetization_observed=True)
 
     assert no_business.opportunity == 0.0
     assert no_room.opportunity == 0.0
@@ -289,7 +280,7 @@ def test_素点が高くても機会スコアが低ければ今すぐ狙わな�
     crowded = Score(demand=20, low_competition=1, monetizability=20, trend_growth=15,
                     contentability=10, affiliate_fit=10, durability=5,
                     source_reliability=5, scored=True, llm_verdict="now",
-                    monetization_readiness="immediate")
+                    monetization_observed=True)
 
     assert crowded.total >= 70
     assert _scorer().decide_verdict(crowded) != "now"
@@ -309,12 +300,12 @@ def test_順位付けは機会スコアで決まる():
         id="crowded", candidate=Candidate(title="流行中"),
         score=Score(demand=20, low_competition=1, monetizability=20, trend_growth=15,
                     contentability=10, affiliate_fit=10, durability=5,
-                    source_reliability=5, scored=True, monetization_readiness="immediate"))
+                    source_reliability=5, scored=True, monetization_observed=True))
     balanced = Opportunity(         # 素点は低いが両方そこそこ
         id="balanced", candidate=Candidate(title="伸び始め"),
         score=Score(demand=12, low_competition=11, monetizability=12, trend_growth=11,
                     contentability=7, affiliate_fit=7, durability=3,
-                    source_reliability=3, scored=True, monetization_readiness="immediate"))
+                    source_reliability=3, scored=True, monetization_observed=True))
 
     assert crowded.score.total > balanced.score.total
     assert _scorer().rank([crowded, balanced])[0].id == "balanced"

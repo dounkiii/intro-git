@@ -6,7 +6,8 @@
 from __future__ import annotations
 
 from src.scout.commitment import (ADOPT, CHEAP_TEST, EXIT, OBSERVE, SCALE,
-                                  budget_for, initial_level, next_level)
+                                  budget_for, initial_level, is_reproducible,
+                                  next_level)
 
 
 # --- 初期レベル -------------------------------------------------------------
@@ -47,47 +48,128 @@ def test_小さく試すには公開上限がある():
     assert budget_for(ADOPT).test_posts == 0          # 0 = 上限なし
 
 
-# --- 遷移 -------------------------------------------------------------------
-def test_売上が出たら枠を増やす():
-    level, why = next_level(CHEAP_TEST, stage=5, decided=True, revenue_jpy=3200,
-                            posts=3, creatives_tried=1)
+# --- 再現性ゲート -----------------------------------------------------------
+def test_初回売上ではSCALEにしない():
+    """1件の売上は偶然の可能性がある。初回の成功シグナルに過剰反応しない。"""
+    level, why, diagnosing = next_level(
+        CHEAP_TEST, stage=5, decided=True, revenue_jpy=3200, posts=3,
+        creatives_tried=1, conversions=1, revenue_events=1)
+
+    assert level == ADOPT              # 昇格はするが SCALE ではない
+    assert "再現性が未確認" in why
+    assert diagnosing == ""
+
+
+def test_CVが2件以上なら再現性ありとしてSCALEする():
+    level, why, _ = next_level(CHEAP_TEST, stage=5, decided=True, revenue_jpy=6400,
+                               posts=8, creatives_tried=1, conversions=2,
+                               revenue_events=1)
 
     assert level == SCALE
-    assert "売上" in why
+    assert "再現性を確認" in why
 
 
+def test_売上を2回観測すれば再現性ありとする():
+    """CV が取れないプラットフォームでも再現性を判定できるようにする。"""
+    level, why, _ = next_level(CHEAP_TEST, stage=5, decided=True, revenue_jpy=6400,
+                               posts=8, creatives_tried=1, conversions=None,
+                               revenue_events=2)
+
+    assert level == SCALE
+
+
+def test_ADOPTのまま初回売上を繰り返してもSCALEには上がらない():
+    level, _, _ = next_level(ADOPT, stage=5, decided=True, revenue_jpy=3200,
+                             posts=8, creatives_tried=1, conversions=1,
+                             revenue_events=1)
+
+    assert level == ADOPT
+
+
+def test_再現性の判定条件():
+    assert is_reproducible(2, 1)[0] is True
+    assert is_reproducible(None, 2)[0] is True
+    assert is_reproducible(1, 1)[0] is False
+    assert is_reproducible(None, 1)[0] is False
+
+
+# --- 診断中フラグ -----------------------------------------------------------
+def test_配信は成立していても診断中は昇格させない():
+    """悪い導線に対して制作量だけ増やさないための歯止め。"""
+    for stage, cause in ((2, "creative"), (3, "funnel"), (4, "offer")):
+        level, why, diagnosing = next_level(
+            CHEAP_TEST, stage=stage, decided=True, revenue_jpy=0, posts=8,
+            creatives_tried=1, likely_cause=cause)
+
+        assert level == CHEAP_TEST          # ADOPT に上げない
+        assert diagnosing == cause
+        assert "生成枠を増やさない" in why
+
+
+def test_診断中は生成枠が抑えられる():
+    for level in (ADOPT, SCALE):
+        normal = budget_for(level).items_per_run
+        diagnosing = budget_for(level, "offer").items_per_run
+
+        assert diagnosing < normal
+        assert diagnosing == 1
+
+
+def test_売上が出れば診断中フラグは解除される():
+    _, _, diagnosing = next_level(ADOPT, stage=5, decided=True, revenue_jpy=3200,
+                                  posts=8, creatives_tried=1, conversions=1,
+                                  revenue_events=1)
+
+    assert diagnosing == ""
+
+
+# --- その他の遷移 -----------------------------------------------------------
 def test_判定不能ではレベルを動かさない():
     """データが無いことを「悪い」と読み替えない。"""
-    level, why = next_level(CHEAP_TEST, stage=0, decided=False, revenue_jpy=0,
-                            posts=1, creatives_tried=1)
+    level, why, _ = next_level(CHEAP_TEST, stage=0, decided=False, revenue_jpy=0,
+                               posts=1, creatives_tried=1)
 
     assert level == CHEAP_TEST
     assert "不足" in why
 
 
 def test_配信されなくても切り口を試していなければ撤退しない():
-    level, why = next_level(CHEAP_TEST, stage=1, decided=True, revenue_jpy=0,
-                            posts=3, creatives_tried=1)
+    level, why, _ = next_level(CHEAP_TEST, stage=1, decided=True, revenue_jpy=0,
+                               posts=3, creatives_tried=1)
 
     assert level == CHEAP_TEST
     assert "切り口" in why
 
 
 def test_複数の切り口で配信されなければ撤退する():
-    level, why = next_level(CHEAP_TEST, stage=1, decided=True, revenue_jpy=0,
-                            posts=9, creatives_tried=3)
+    level, _, _ = next_level(CHEAP_TEST, stage=1, decided=True, revenue_jpy=0,
+                             posts=9, creatives_tried=3)
 
     assert level == EXIT
-
-
-def test_配信が成立していれば通常運用に上がる():
-    """Stage 2〜4 は配信は出来ている = ニッチの問題ではない。"""
-    level, why = next_level(CHEAP_TEST, stage=3, decided=True, revenue_jpy=0,
-                            posts=3, creatives_tried=1)
-
-    assert level == ADOPT
 
 
 def test_撤退済みと監視のみは動かさない():
     assert next_level(EXIT, 5, True, 9999, 10, 3)[0] == EXIT
     assert next_level(OBSERVE, 5, True, 9999, 10, 3)[0] == OBSERVE
+
+
+def test_明示的な採用は何もしないレベルに落とさない(tmp_path, monkeypatch):
+    """`/adopt` を叩いたのに OBSERVE になると、人間の指示が無視される。"""
+    from src.config import Config
+    from src.scout.models import Candidate, Opportunity, Score
+    from src.scout.runner import ScoutPipeline
+
+    pipeline = ScoutPipeline(Config.load())
+    monkeypatch.setattr(pipeline.niches, "path", tmp_path / "niches.yaml")
+    monkeypatch.setattr(pipeline.ledger, "path", tmp_path / "ledger.jsonl")
+
+    low = Opportunity(id="low", candidate=Candidate(title="スコアの低いネタ"),
+                      score=Score(scored=True), verdict="watch")
+    monkeypatch.setattr(pipeline.store, "get", lambda _id: low)
+    monkeypatch.setattr(pipeline.store, "set_status", lambda *a, **k: None)
+
+    reply = pipeline.adopt("low")
+
+    assert CHEAP_TEST in reply
+    assert OBSERVE not in reply
+    assert pipeline.niches.load()[0].commitment == CHEAP_TEST

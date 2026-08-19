@@ -694,3 +694,81 @@ EXIT へ自動遷移する）は実装済みで、あとは実データが流れ
 
 **次のフェーズはコードを書くことではなく、Discovery → Test → Adopt → Publish → Revenue
 を回してデータを作ること。**
+
+---
+
+# 第5ラウンド（凍結） — 昇格に3つの歯止めを入れた
+
+最終確認の3点はすべて妥当だった。特に1番は**実運用前に直すべきバグ**だったので実装した。
+
+## ① 1件の売上で SCALE しない（「売れた」と「再現性がある」を分ける）
+
+旧実装は `revenue > 0 → SCALE` で、**初回の成功シグナルに過剰反応していた。**
+1件の売上は偶然の可能性があるのに、生成枠を1本から4本に増やしていた。
+
+修正後の判定（`is_reproducible`）:
+
+| 状態 | 遷移 |
+|---|---|
+| 初回売上（CV 1件 / 売上観測1回） | **ADOPT**（昇格はするが SCALE にしない） |
+| CV 2件以上 | **SCALE** |
+| 売上が増えたことを2回以上観測 | **SCALE** |
+
+CV が取れないプラットフォームでも判定できるよう、条件を2本立てにした。
+「売上が増えた回数」は Ledger の履歴から数える（`ExperimentLedger.revenue_events`）。
+閾値は `config.yaml` の `scout.scale_gate` で変更できる仮値。
+
+## ② Stage 2〜4 を一律 ADOPT にしない（診断中フラグ）
+
+指摘のとおり「配信が成立している」と「制作量を増やすべき」は別。Stage 4 の状態で
+生成枠を増やすと、**悪い導線に対して制作量だけ増える。**
+
+新しいレベル名は増やさず、`Niche.diagnosing` を持たせた。
+
+```
+Stage 2 → diagnosing = "creative"   切り口が未解消
+Stage 3 → diagnosing = "funnel"     導線・CTA が未解消
+Stage 4 → diagnosing = "offer"      案件・商品 が未解消
+```
+
+診断中は**レベルを昇格させず、生成枠を1本に抑える**（`budget_for(level, diagnosing)`）。
+ADOPT でも SCALE でも診断中は1本。売上が出るか Stage が改善すればフラグは解除される。
+ニッチ撤退はしない（配信は成立しているので）点は従来どおり。
+
+## ③ potential は inferred として保存する
+
+`monetization_readiness` の3値は派生値にして、根拠を種類ごとに分けて保存した。
+
+| フィールド | 種類 | 判定方法 |
+|---|---|---|
+| `monetization_observed` | **実測** | `AFF_*` に案件が実在する |
+| `monetization_inferred` | **推論** | 調査結果に収益化手段・商品が挙がっている |
+
+`monetization_readiness`（immediate / potential / none）と
+`monetization_source`（observed / inferred / none）はどちらも派生値。
+Ledger の予測行と校正表に `monetization_source` を記録するので、
+**「LLM が稼げると言った」と「実際に案件が存在した」を同じ種類のデータとして扱わない。**
+
+`potential` に 0.6 を与えるのは初期仮説のままだが、校正時に両者を分離できる。
+旧形式（`monetization_readiness` / `route_available`）の台帳も読めるようにしてある。
+
+## 実装中に見つけた別のバグ
+
+`/adopt` を明示的に叩いたのに、スコアが低い候補が `OBSERVE`（何もしない）に落ちていた。
+**人間の明示指示が無視される**状態だったので、`/adopt` の下限を `CHEAP_TEST` にした。
+OBSERVE は自動分類のためのレベルで、明示指示には使わない。
+
+## 設計凍結
+
+これで凍結。実装としてやることは尽きた。テスト 140 件通過。
+
+残る弱点はすべて「データがまだ無い」ことに起因し、コードでは解決できない。
+
+1. SERP は代理指標（実SERPは有料。初売上後）
+2. 検索ボリュームは未実測（同上）
+3. observed→点数の換算ルールは未校正（Ledger 20件で）
+4. 自アカウント baseline / 他ニッチ比較はサンプル0件（実績が溜まれば自動で有効化）
+5. `scale_gate` の閾値（CV 2件 / 売上2回）も仮値（同上）
+
+**次はコードを書くフェーズではなく、Discovery → Test → Adopt → Publish → Revenue を
+回してデータを作るフェーズ。**

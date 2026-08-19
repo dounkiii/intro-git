@@ -68,6 +68,9 @@ class Prediction:
     predicted_growth: int = 0
     predicted_low_competition: int = 0
     predicted_monetization: int = 0
+    # 換金の根拠が実測か推論か。校正時に混ぜないための区別。
+    monetization_readiness: str = ""
+    monetization_source: str = ""
     confidence: float = 0.0
     observed_ratio: float = 0.0
     conflicts: list[str] = field(default_factory=list)
@@ -167,6 +170,8 @@ class ExperimentLedger:
             predicted_growth=s.evidence.value("trend_growth"),
             predicted_low_competition=s.evidence.value("low_competition"),
             predicted_monetization=s.evidence.value("monetizability"),
+            monetization_readiness=s.monetization_readiness,
+            monetization_source=s.monetization_source,
             confidence=s.confidence, observed_ratio=s.observed_ratio,
             conflicts=list(s.conflicts),
         )
@@ -197,6 +202,23 @@ class ExperimentLedger:
             baseline_samples=self.baseline_samples(metrics.platform),
             peer_samples=self.peer_samples(metrics.platform),
         )
+
+    def revenue_events(self, niche_slug: str) -> int:
+        """売上が増えたことを観測した回数。
+
+        「売れた」と「再現性がある」を分けるために使う。1件の売上は偶然の可能性が
+        あるので、これが 2 以上になるまで SCALE には上げない。
+        """
+        seen = 0
+        previous = 0
+        for row in sorted((r for r in self.rows("outcome")
+                           if r.get("niche_slug") == niche_slug),
+                          key=lambda r: r.get("ts", "")):
+            revenue = int(row.get("metrics", {}).get("revenue_jpy", 0))
+            if revenue > previous:
+                seen += 1
+            previous = max(previous, revenue)
+        return seen
 
     def peer_samples(self, platform: str = "") -> dict[str, float]:
         """{niche_slug: 最新の1投稿あたりインプ}。同フォーマットの他ニッチとの比較用。
@@ -536,6 +558,7 @@ class ExperimentLedger:
                 "predicted_opportunity": p.get("predicted_opportunity", 0),
                 "predicted_total": p.get("predicted_total", 0),
                 "predicted_low_competition": p.get("predicted_low_competition", 0),
+                "monetization_source": p.get("monetization_source", ""),
                 "actual_rpm": round(FunnelMetrics(**{
                     k: v for k, v in m.items()
                     if k in FunnelMetrics.__dataclass_fields__}).rpm, 1) if m else 0.0,

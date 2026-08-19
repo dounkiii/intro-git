@@ -99,7 +99,7 @@ def test_機会順位が高く確信順位が低い候補が選ばれる():
         score = Score(demand=opportunity_axis, low_competition=15, trend_growth=15,
                       monetizability=opportunity_axis, affiliate_fit=10,
                       contentability=10, durability=5, source_reliability=5,
-                      scored=True, monetization_readiness="immediate")
+                      scored=True, monetization_observed=True)
         for axis, mx in (("low_competition", 15), ("trend_growth", 15)):
             score.evidence.observe(axis, mx, score.evidence.value(axis),
                                    source="test", confidence=confidence)
