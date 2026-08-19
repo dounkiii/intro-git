@@ -1,0 +1,28 @@
+{
+  "candidates": [
+    {
+      "title": "インボイス2割特例の終了で個人事業主の乗り換え需要が出始めている",
+      "summary": "特例終了の話題が増え、会計ソフトの比較を探す投稿が目立ち始めた。日本語の比較記事はまだ古い情報のまま。",
+      "source": "x_api",
+      "keywords": ["インボイス", "2割特例", "会計ソフト"],
+      "evidence_urls": ["https://twitter.com/i/web/status/sample-sc1"],
+      "signals": {"intent": "needs", "likes": 420, "likes_per_hour": 52.0, "author_verified": true}
+    },
+    {
+      "title": "海外で伸びているAI議事録ツールが日本語対応を始めた",
+      "summary": "英語圏では定番化しつつあるが、日本語のレビュー記事がほぼ無い。法人の導入検討が始まっている。",
+      "source": "grok",
+      "keywords": ["AI議事録", "文字起こし", "SaaS"],
+      "evidence_urls": ["https://example.com/news/ai-minutes"],
+      "signals": {"why_early": "日本語の比較記事が3件未満"}
+    },
+    {
+      "title": "ふるさと納税のポータル改定で控除上限の計算需要が急増",
+      "summary": "毎年11-12月に来る季節需要。今年は制度変更が絡み、計算方法の解説を探す投稿が増えている。",
+      "source": "x_api",
+      "keywords": ["ふるさと納税", "控除上限"],
+      "evidence_urls": ["https://twitter.com/i/web/status/sample-sc3"],
+      "signals": {"intent": "wants", "likes": 90, "likes_per_hour": 3.2, "author_verified": false}
+    }
+  ]
+}

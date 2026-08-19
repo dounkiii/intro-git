@@ -1,0 +1,66 @@
+# 探索レイヤ: 発掘 → 裏取り → 採点 → 日次レポート Issue。
+# 制作ジョブ (daily-generate.yml) より 1 時間早く走らせ、通勤前に判断できるようにする。
+#
+# 人間の作業は Issue にコメント1行:
+#   /adopt <id>  → 採用。翌朝からそのテーマでコンテンツが生成される
+#   /drop  <id>  → 捨てる。以後再提示されない
+name: daily-scout
+
+on:
+  schedule:
+    # 20:00 UTC = 翌 05:00 JST（制作ジョブの1時間前）
+    - cron: '0 20 * * *'
+  workflow_dispatch:
+    inputs:
+      sample:
+        description: 'サンプル候補で動かす（true/false）'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write   # 探索結果 (data/scout) をコミットするため
+  issues: write     # レポート Issue を作るため
+
+concurrency:
+  group: pipeline-state
+  cancel-in-progress: false
+
+jobs:
+  scout:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: 依存をインストール
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 発掘・裏取り・採点してレポート Issue を作成
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          SAMPLE_FLAG=""
+          if [ "${{ inputs.sample }}" = "true" ]; then SAMPLE_FLAG="--sample"; fi
+          python -m src.pipeline scout --open-issue $SAMPLE_FLAG
+
+      - name: 探索結果をコミット
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add -A data/
+          if git diff --cached --quiet; then
+            echo "変更なし"
+          else
+            git commit -m "chore: 探索結果を更新 ($(date -u +%Y-%m-%d))"
+            git push
+          fi

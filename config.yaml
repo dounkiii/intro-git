@@ -32,6 +32,46 @@ safety:
   # 収集元として信頼するアカウント種別（優先）
   prefer_verified_sources: true
 
+scout:
+  # === 探索レイヤ（リサーチ → 評価 → 収益化案）===
+  # 目的は「面白いニュース探し」ではなく「需要が生まれ始めているのに供給が薄い市場」の
+  # 早期発見。順位付けは合計点ではなく early_signal（成長性×競合の少なさ）で行う。
+  label: 'scout-report'
+  discover_limit: 12      # 発掘元ごとに拾う件数
+  research_limit: 6       # 裏取り（web_search）まで進める件数。API代に直結する
+  top_n: 3                # レポートに詳細表示する件数
+  dedup_similarity: 0.6   # 過去ネタとの Jaccard 係数の閾値
+  max_searches_per_candidate: 6
+  web_search_tool_type: 'web_search_20260209'   # モデルが古い場合は web_search_20250305
+
+  # 需要の兆候を拾うクエリ。人気ランキングではなく「まだ供給が無い」signal を狙う。
+  discovery_queries:
+    needs:    '("欲しい" OR "誰か作って" OR "ないのかな") (ツール OR サービス OR アプリ) lang:ja -is:retweet'
+    pains:    '("困ってる" OR "面倒すぎる" OR "手作業で") lang:ja -is:retweet'
+    new_tool: '(使ってみた OR 試した) (AI OR 新サービス) lang:ja -is:retweet'
+    money:    '(副業 OR 節税 OR 補助金 OR 給付金) (始めた OR 変わる OR 締切) lang:ja -is:retweet'
+  min_likes: 30
+  max_results_per_query: 25
+
+  # スコア補正の閾値（LLM の自己申告を実測で殴るための基準）
+  thresholds:
+    crowded_domains: 8        # 検索でこれ以上の独立ドメインが出たら「競合が多い」
+    min_likes_per_hour: 5     # これ未満は「伸び始めている」と認めない
+    stale_after_seen: 4       # これ以上観測されて伸びなければ陳腐化として減点
+    now_score: 70             # 「今すぐ狙う」の合計点しきい値
+    drop_score: 45            # これ未満は「捨てる」
+    now_early_signal: 0.55    # 「今すぐ狙う」に必要な早期シグナル
+
+  # Grok (xAI) 発掘。X 上の空気を読む部分は他モデルで代替しにくいので残している。
+  # Web 検索は Claude の web_search で足りるので Gemini は使わない。
+  grok:
+    enabled: false           # XAI_API_KEY を入れて true にする
+    model: 'grok-4'          # 現行のモデル名は https://docs.x.ai/ で確認して設定する
+    base_url: 'https://api.x.ai/v1'
+    topics: ['副業', 'AIツール', 'お金・税金', '個人開発']
+    # Live Search 等を使う場合はここにリクエストパラメータを足す（コード変更不要）
+    extra_body: {}
+
 llm:
   # 台本・記事の生成に使うモデル。未設定の ANTHROPIC_API_KEY 時はテンプレにフォールバック。
   model: 'claude-opus-5'
@@ -58,6 +98,12 @@ monetization:
   # 実リンクはリポジトリに書かず、環境変数（GitHub Secrets）から注入する。
   # slot が空の環境変数を指している案件はスキップされる。
   offers:
+    # 探索レイヤで /adopt した新しいニッチは、専用の案件定義を持たない。
+    # その場合ここが使われる。これが無いと「換金経路なし」で全件作られなくなる。
+    default:
+      - slot: 'AFF_ACCOUNTING_SOFT'
+        label: '関連ツール'
+        cta: '作業を効率化するなら'
     tax:
       - slot: 'AFF_ACCOUNTING_SOFT'
         label: '確定申告ソフト'

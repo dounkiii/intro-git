@@ -75,9 +75,20 @@ class AffiliateEngine:
         return os.getenv(slot, "").strip()
 
     def build(self, category: str) -> MonetizationBlock:
-        """カテゴリに対応する収益化ブロックを組む。"""
+        """カテゴリに対応する収益化ブロックを組む。
+
+        探索レイヤで採用した新しいニッチは専用の案件定義を持たないため、
+        `offers.default` にフォールバックする。これが無いと採用したネタが
+        すべて「換金経路なし」になり、1本も作られなくなる。
+        """
+        entries = self.offers_by_category.get(category)
+        if not entries:
+            entries = self.offers_by_category.get("default", []) or []
+            if entries:
+                logger.debug("category=%s に専用案件がないため default を使います。", category)
+
         resolved: list[Offer] = []
-        for entry in self.offers_by_category.get(category, []) or []:
+        for entry in entries:
             slot = entry.get("slot", "")
             url = self._resolve(slot)
             if not url:

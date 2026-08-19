@@ -83,3 +83,60 @@ class ClaudeClient:
         except json.JSONDecodeError:
             logger.warning("Claude のレスポンスが JSON として読めませんでした。")
             return None
+
+    def research(self, system: str, prompt: str, max_uses: int = 6,
+                 tool_type: str = "web_search_20260209") -> tuple[str, list[str]] | None:
+        """web_search サーバーツールで裏取りし、(本文, 参照URL) を返す。
+
+        ちゃっぴー案では Gemini に担当させていた工程。Claude のサーバー側 web_search を
+        使えば「検索して読んで書く」が1リクエストで済むため、プロバイダを増やさずに
+        同じことができる。失敗時は None（呼び出し側は検索なしにフォールバックする）。
+
+        `tool_type` はモデルによって対応版が違うため設定で差し替え可能にしている。
+        """
+        client = self._ensure_client()
+        if client is None:
+            return None
+
+        try:
+            response = client.messages.create(
+                model=self.model,
+                max_tokens=self.max_tokens,
+                system=system,
+                messages=[{"role": "user", "content": prompt}],
+                tools=[{"type": tool_type, "name": "web_search", "max_uses": max_uses}],
+                output_config={"effort": self.effort},
+            )
+        except Exception as exc:
+            logger.warning("web_search 付きの呼び出しに失敗しました（%s）。検索なしで続行します。",
+                           type(exc).__name__)
+            return None
+
+        if response.stop_reason == "refusal":
+            logger.warning("Claude が調査を拒否しました。この候補はスキップします。")
+            return None
+
+        text = "\n".join(b.text for b in response.content if b.type == "text")
+        return text, self._collect_urls(response)
+
+    @staticmethod
+    def _collect_urls(response) -> list[str]:
+        """web_search の結果ブロックから参照 URL を集める。
+
+        サーバーツールのエラーは例外ではなく 200 で返り、成功時の `content` は
+        リスト、エラー時はオブジェクトになる。indexing する前に型で分岐する。
+        """
+        urls: list[str] = []
+        for block in response.content:
+            if getattr(block, "type", "") != "web_search_tool_result":
+                continue
+            content = getattr(block, "content", None)
+            if not isinstance(content, list):
+                code = getattr(content, "error_code", None)
+                logger.warning("web_search がエラーを返しました: %s", code)
+                continue
+            for result in content:
+                url = getattr(result, "url", "")
+                if url and url not in urls:
+                    urls.append(url)
+        return urls

@@ -2,7 +2,12 @@
 
 設計の中心は「生産は全自動、承認だけ人間」。詳細は docs/PLAYBOOK.md。
 
+2層構成:
+  探索レイヤ (scout)  発掘 → 裏取り → 採点 → 日次レポート → /adopt でニッチ採用
+  制作レイヤ (run)    採用ニッチで 台本/記事/動画 → /approve で投稿
+
 サブコマンド:
+  scout     発掘→裏取り→採点→日次レポート（探索レイヤ）
   run       収集→分類→安全性→Claudeで台本と記事→動画→レビュー投入→承認Issue作成
   review    レビューキューの一覧 / 承認 / 却下
   command   Issue コメント（/approve 等）を処理する（GitHub Actions から呼ぶ）
@@ -113,6 +118,13 @@ class Pipeline:
     def _run_command(self, cmd: Command) -> str:
         if cmd.action == "status":
             return self._render_status()
+
+        # 探索レイヤのコマンド。scout は重い import を持つので遅延ロードする。
+        if cmd.action in ("adopt", "drop"):
+            from .scout import ScoutPipeline
+
+            scout = ScoutPipeline(self.config)
+            return scout.adopt(cmd.target) if cmd.action == "adopt" else scout.drop(cmd.target)
 
         if cmd.action == "revenue":
             try:
@@ -233,6 +245,13 @@ def _cmd_run(args) -> None:
     Pipeline().run(limit=args.limit, use_sample=args.sample, open_issue=args.open_issue)
 
 
+def _cmd_scout(args) -> None:
+    from .scout import ScoutPipeline
+
+    _, report = ScoutPipeline().run(use_sample=args.sample, open_issue=args.open_issue)
+    print(report)
+
+
 def _cmd_review(args) -> None:
     queue = ReviewQueue()
     if args.approve:
@@ -280,6 +299,11 @@ def build_parser() -> argparse.ArgumentParser:
         prog="pipeline", description="スマホ承認型 AI 収益パイプライン"
     )
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p_scout = sub.add_parser("scout", help="発掘〜裏取り〜採点〜日次レポート")
+    p_scout.add_argument("--sample", action="store_true", help="サンプル候補で実行")
+    p_scout.add_argument("--open-issue", action="store_true", help="レポート Issue を作成する")
+    p_scout.set_defaults(func=_cmd_scout)
 
     p_run = sub.add_parser("run", help="収集〜台本/記事/動画生成〜承認キュー投入")
     p_run.add_argument("--limit", type=int, default=None)

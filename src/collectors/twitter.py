@@ -28,7 +28,14 @@ class TwitterCollector:
     def collect(self, use_sample: bool | None = None) -> dict[str, list[Tweet]]:
         """設定された各クエリでツイートを収集し、カテゴリ別に返す。"""
         collection = self.config.section("collection")
-        queries: dict[str, str] = collection.get("queries", {})
+        queries: dict[str, str] = dict(collection.get("queries", {}))
+
+        # 探索レイヤで /adopt されたニッチを合流させる。これが「リサーチした結果を
+        # 実際に作る」までを閉じている接点（src/scout/niches.py）。
+        adopted = self._adopted_queries()
+        if adopted:
+            logger.info("採用ニッチを %d件 追加します: %s", len(adopted), list(adopted))
+            queries.update(adopted)
 
         if use_sample is None:
             use_sample = not self.token
@@ -41,6 +48,17 @@ class TwitterCollector:
                 results[category] = self._search(query, collection)
             logger.info("collected %d tweets for category=%s", len(results[category]), category)
         return results
+
+    @staticmethod
+    def _adopted_queries() -> dict[str, str]:
+        """data/adopted_niches.yaml から有効なクエリを読む。未作成なら空。"""
+        try:
+            from ..scout.niches import NicheRegistry
+
+            return NicheRegistry().active_queries()
+        except Exception as exc:  # 探索レイヤ未設定でも制作は止めない
+            logger.debug("採用ニッチの読み込みをスキップしました: %s", exc)
+            return {}
 
     # ------------------------------------------------------------------
     def _search(self, query: str, collection: dict) -> list[Tweet]:

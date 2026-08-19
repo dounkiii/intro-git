@@ -1,7 +1,7 @@
 # 承認コメントを処理するジョブ。スマホからの `/approve` で起動する。
 #
 # 起動条件を絞っている理由:
-#   - approval-queue ラベルの付いた Issue のみ（無関係な Issue で動かさない）
+#   - approval-queue / scout-report ラベルの付いた Issue のみ（無関係な Issue で動かさない）
 #   - コメントが `/` で始まるものだけ（雑談で起動しない）
 #   - コメント投稿者がリポジトリのオーナー/メンバーのみ（第三者が投稿を承認できないように）
 name: approve-command
@@ -21,7 +21,8 @@ concurrency:
 jobs:
   handle:
     if: >-
-      contains(github.event.issue.labels.*.name, 'approval-queue') &&
+      (contains(github.event.issue.labels.*.name, 'approval-queue') ||
+       contains(github.event.issue.labels.*.name, 'scout-report')) &&
       startsWith(github.event.comment.body, '/') &&
       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
@@ -53,6 +54,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          # /adopt は探索結果を読むので ANTHROPIC_API_KEY は不要だが、
+          # 同じジョブで publish まで走るため収益化リンクを通しておく
+          AFF_HUB_URL: ${{ secrets.AFF_HUB_URL }}
         run: |
           python -m src.pipeline command \
             --body-file /tmp/comment.txt \
