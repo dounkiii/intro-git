@@ -35,6 +35,31 @@ CALIBRATION_MIN_ROWS = 20
 # 運用上の異常検知を行う間隔。統計的校正とは別で、配点は一切変更しない。
 DIAGNOSTIC_REVIEW_EVERY = 5
 
+# 同じ異常がこの回数連続したら、20件を待たずに点検する（再開条件その3）。
+# ただし点検の対象は実装バグ・運用障害に限り、アルゴリズムは触らない。
+REPEAT_ESCALATION = 2
+
+# 20件未満でも直してよいもの（実装バグ・運用障害）
+FIXABLE_BEFORE_CALIBRATION = (
+    "publish_zero", "publish_low", "metrics_missing", "transition_stuck",
+)
+# 20件未満では原則触らないもの（アルゴリズム）
+FROZEN_UNTIL_CALIBRATION = (
+    "cause_concentrated", "speculative_shutout", "stage1_dominant",
+    "diagnosing_concentrated",
+)
+
+ANOMALY_LABELS = {
+    "publish_zero": "採用しても1本も公開されていない",
+    "publish_low": "公開到達率が低い",
+    "metrics_missing": "views 未入力が多く Stage 判定ができない",
+    "transition_stuck": "投資レベルが動いていない",
+    "cause_concentrated": "推定原因が1つに集中している",
+    "speculative_shutout": "探索候補が全滅している",
+    "stage1_dominant": "Stage 1（配信の失敗）に偏っている",
+    "diagnosing_concentrated": "診断中の原因が1つに集中している",
+}
+
 # 1回の判断にかかる時間の既定値（秒）。実測が入るまでの仮の値。
 ATTENTION_SECONDS = {"adopt": 90, "drop": 20, "approve": 40, "reject": 30, "metrics": 60}
 
@@ -344,65 +369,191 @@ class ExperimentLedger:
         revenue_total = sum(r for _, r in best.values())
         return round(revenue_total / posts_total, 1) if posts_total else 0.0
 
-    def diagnostic_review(self) -> list[str]:
-        """5件ごとの運用上の異常検知。**配点・mapping・ランキング式は変更しない。**
+    def detect_anomalies(self) -> dict[str, str]:
+        """運用上の異常を検出する。{異常コード: 詳細} を返す。
 
-        統計的校正（20件以降）とは別物。N=5 でも「5採用して公開0本」は明らかに問題で、
-        それは配点の話ではなく運用の話だから。
+        コードで返すのは、前回のレビュー結果と突き合わせて
+        「同じ異常が2回連続したか」を判定するため。
         """
         predictions = self.rows("prediction")
-        n = len(predictions)
-        if n == 0 or n % DIAGNOSTIC_REVIEW_EVERY != 0:
-            return []
-
         outcomes = self.rows("outcome")
-        findings: list[str] = [f"### 診断レビュー（採用 {n} 件時点・配点は変更しない）", ""]
+        anomalies: dict[str, str] = {}
 
         published, adopted = self.publish_rate()
         if adopted and published == 0:
-            findings.append(f"- 🚨 {adopted}件採用して**公開が0本**。探索より先に制作・承認の"
-                            "詰まりを見る（下流のスコア精度は無関係）")
+            anomalies["publish_zero"] = f"{adopted}件採用して公開0本"
         elif adopted and published < adopted / 2:
-            findings.append(f"- ⚠️ 公開到達率 {published}/{adopted}。採用しても市場に出ていない")
+            anomalies["publish_low"] = f"公開到達率 {published}/{adopted}"
 
         stages: dict[int, int] = {}
         causes: dict[str, int] = {}
         for slug in {r["niche_slug"] for r in outcomes}:
             latest = self.latest_outcome(slug)
-            if latest:
-                stages[latest["stage"]] = stages.get(latest["stage"], 0) + 1
-                cause = latest.get("likely_cause", "unknown")
-                causes[cause] = causes.get(cause, 0) + 1
-        if stages:
-            findings.append("- Stage 分布: "
-                            + " / ".join(f"Stage{k} {v}件" for k, v in sorted(stages.items())))
-        dominant = max(causes.items(), key=lambda kv: kv[1]) if causes else None
-        if dominant and dominant[1] >= 3:
-            findings.append(f"- ⚠️ 推定原因が `{dominant[0]}` に {dominant[1]}件 集中。"
-                            "同じ失敗を繰り返している")
+            if not latest:
+                continue
+            stages[latest["stage"]] = stages.get(latest["stage"], 0) + 1
+            cause = latest.get("likely_cause", "unknown")
+            causes[cause] = causes.get(cause, 0) + 1
+
+        decided = sum(v for k, v in stages.items() if k != 0)
+        if decided >= 3 and stages.get(1, 0) >= decided * 0.6:
+            anomalies["stage1_dominant"] = f"Stage1 が {stages[1]}/{decided}件"
+
+        judged = {k: v for k, v in causes.items() if k != "unknown"}
+        if judged:
+            code, count = max(judged.items(), key=lambda kv: kv[1])
+            if count >= 3:
+                anomalies["cause_concentrated"] = f"`{code}` に {count}件"
+                if code == "offer":
+                    anomalies["diagnosing_concentrated"] = f"案件・商品の問題が {count}件"
 
         spec = [r for r in predictions if r.get("speculative")]
-        if spec:
+        if len(spec) >= 3:
             earning = {r["niche_slug"] for r in outcomes
                        if int(r.get("metrics", {}).get("revenue_jpy", 0)) > 0}
-            spec_win = sum(1 for r in spec if r.get("niche_slug") in earning)
-            normal = [r for r in predictions if not r.get("speculative")]
-            normal_win = sum(1 for r in normal if r.get("niche_slug") in earning)
-            findings.append(f"- 探索候補（speculative）{len(spec)}件中 {spec_win}件が収益化 / "
-                            f"通常 {len(normal)}件中 {normal_win}件")
-            if len(spec) >= 3 and spec_win == 0:
-                findings.append("  → 探索しきい値（機会30 / 確信0.45）を疑う価値がある。"
-                                "ただし変更は20件以降")
+            if not any(r.get("niche_slug") in earning for r in spec):
+                anomalies["speculative_shutout"] = f"探索候補 {len(spec)}件すべて収益0"
 
-        missing = sum(1 for r in outcomes if r.get("metrics", {}).get("impressions") is None)
-        if outcomes and missing / len(outcomes) > 0.5:
-            findings.append(f"- ⚠️ views 未入力が {missing}/{len(outcomes)}件。"
-                            "Stage 判定ができず台帳が育たない")
+        if outcomes:
+            missing = sum(1 for r in outcomes
+                          if r.get("metrics", {}).get("impressions") is None)
+            if missing / len(outcomes) > 0.5:
+                anomalies["metrics_missing"] = f"views 未入力 {missing}/{len(outcomes)}件"
 
-        findings.append("")
-        findings.append("配点・mapping・ランキング式の変更は採用 "
-                        f"{CALIBRATION_MIN_ROWS} 件以降に検討する。")
-        return findings
+        # 投資レベルが一度も動いていない = 状態遷移が壊れている可能性
+        if len(outcomes) >= 3 and predictions:
+            levels = {r.get("commitment", "") for r in predictions}
+            moved = any(o.get("stage", 0) not in (0,) for o in outcomes)
+            if moved and len(levels) <= 1 and not self._level_changed():
+                anomalies["transition_stuck"] = "実績が入っているのにレベルが未変化"
+
+        return anomalies
+
+    def _level_changed(self) -> bool:
+        """ニッチの投資レベルが初期値から動いたことがあるか。"""
+        try:
+            from .niches import NicheRegistry
+
+            return any(n.level_reason and "レベル変更なし" not in n.level_reason
+                       for n in NicheRegistry().load())
+        except Exception:
+            return True     # 判定できないときは異常扱いにしない
+
+    def repeated_anomalies(self, current: dict[str, str]) -> dict[str, int]:
+        """今回の異常のうち、過去のレビューから連続しているものと連続回数。"""
+        history = [set(r.get("anomalies", {})) for r in self.rows("review")]
+        repeated: dict[str, int] = {}
+        for code in current:
+            streak = 1
+            for past in reversed(history):
+                if code in past:
+                    streak += 1
+                else:
+                    break
+            if streak >= REPEAT_ESCALATION:
+                repeated[code] = streak
+        return repeated
+
+    def diagnostic_review(self, force: bool = False) -> list[str]:
+        """5件ごとの運用上の異常検知。**配点・mapping・ランキング式は変更しない。**
+
+        統計的校正（20件以降）とは別物。N=5 でも「5採用して公開0本」は明らかに問題で、
+        それは配点の話ではなく運用の話だから。
+
+        同じ異常が2回連続したら、20件を待たずに点検対象として明示する。
+        ただし点検の対象は**実装バグ・運用障害に限り、アルゴリズムは触らない**。
+        """
+        predictions = self.rows("prediction")
+        n = len(predictions)
+        if not force and (n == 0 or n % DIAGNOSTIC_REVIEW_EVERY != 0):
+            return []
+
+        anomalies = self.detect_anomalies()
+        repeated = self.repeated_anomalies(anomalies)
+        self._append({"kind": "review", "ts": _now(), "adopted": n,
+                      "anomalies": anomalies, "repeated": repeated})
+
+        lines = [f"### 診断レビュー（採用 {n} 件時点・配点は変更しない）", ""]
+        if not anomalies:
+            lines.append("- 運用上の異常は検出されていません。")
+            lines += ["", f"配点・mapping・ランキング式の変更は採用 "
+                          f"{CALIBRATION_MIN_ROWS} 件以降に検討する。"]
+            return lines
+
+        fixable = {k: v for k, v in anomalies.items() if k in FIXABLE_BEFORE_CALIBRATION}
+        frozen = {k: v for k, v in anomalies.items() if k in FROZEN_UNTIL_CALIBRATION}
+
+        if fixable:
+            lines += ["**今すぐ直してよい（実装バグ・運用障害）**", ""]
+            for code, detail in fixable.items():
+                mark = f"🚨 {repeated[code]}回連続 " if code in repeated else "⚠️ "
+                lines.append(f"- {mark}{ANOMALY_LABELS.get(code, code)}: {detail}")
+            lines.append("")
+
+        if frozen:
+            lines += ["**記録のみ（アルゴリズムは20件まで触らない）**", ""]
+            for code, detail in frozen.items():
+                mark = f"🚨 {repeated[code]}回連続 " if code in repeated else "・"
+                lines.append(f"- {mark}{ANOMALY_LABELS.get(code, code)}: {detail}")
+            lines.append("")
+
+        if repeated:
+            lines += [
+                f"🚨 **同じ異常が{REPEAT_ESCALATION}回以上連続しています。"
+                f"20件を待たずに点検してください。**",
+                "",
+                "点検してよいのは実装バグ・運用障害だけです"
+                "（公開されない / metrics が取れない / 状態遷移がおかしい / "
+                "人間の明示指示が無視される）。",
+                "配点・mapping・scale_gate・speculative閾値・opportunity計算式・"
+                "monetization の重みは触りません。",
+                "",
+            ]
+
+        lines.append(f"配点・mapping・ランキング式の変更は採用 "
+                     f"{CALIBRATION_MIN_ROWS} 件以降に検討する。")
+        return lines
+
+    def first_revenue_postmortem(self) -> list[str]:
+        """初売上が出たときの振り返り。**配点を変える前に事実を記録する。**
+
+        初売上が出てもすぐ配点を変えない。まず「何が売れたか / どの Stage を通ったか /
+        speculative か通常候補か / CHEAP_TEST からどう遷移したか / 何本で到達したか」を
+        記録し、再現性を見る。
+        """
+        outcomes = sorted(self.rows("outcome"), key=lambda r: r.get("ts", ""))
+        winner = next((r for r in outcomes
+                       if int(r.get("metrics", {}).get("revenue_jpy", 0)) > 0), None)
+        if winner is None:
+            return []
+
+        slug = winner.get("niche_slug", "")
+        prediction = next((r for r in self.rows("prediction")
+                           if r.get("niche_slug") == slug), {})
+        path = [f"Stage{r.get('stage')}" for r in outcomes
+                if r.get("niche_slug") == slug]
+        first_items, _ = self.published_items_to_first_revenue()
+        adoptions, _ = self.adoptions_to_first_revenue()
+
+        return [
+            "### 🎉 初売上の振り返り（配点はまだ変えない）",
+            "",
+            f"- **何が売れたか**: {prediction.get('title', slug)}（`{slug}`）",
+            f"- **最初に作ったもの**: {prediction.get('best_product') or '（未記録）'}",
+            f"- **通った Stage**: {' → '.join(path) or '（未記録）'}",
+            f"- **候補の種類**: "
+            + ("探索候補（speculative）" if prediction.get("speculative") else "通常候補"),
+            f"- **採用時の投資レベル**: {prediction.get('commitment') or '（未記録）'}",
+            f"- **換金の根拠**: {prediction.get('monetization_source') or '（未記録）'}"
+            f"（{prediction.get('monetization_readiness') or '不明'}）",
+            f"- **採用時の予測**: 機会 {prediction.get('predicted_opportunity', 0)} / "
+            f"確信 {prediction.get('confidence', 0)}",
+            f"- **到達までの採用件数**: {adoptions}件 / **公開本数**: {first_items}本",
+            "",
+            "次にやるのは配点変更ではなく **再現性の確認**。"
+            f"`{slug}` と同じ構成（Stage 遷移・候補の種類・換金の根拠）で"
+            "もう1件出せるかを見る。",
+        ]
 
     def stale_niches(self, days: int = 7) -> list[tuple[str, int]]:
         """実績が更新されていない採用ニッチ。週次リマインダー Issue に使う。
@@ -504,6 +655,10 @@ class ExperimentLedger:
                 names = sorted(set(stuck[stage]))
                 label = next((r["stage_label"] for r in outcomes if r["stage"] == stage), "")
                 lines.append(f"- Stage {stage}（{label}）: {', '.join(names)}")
+
+        postmortem = self.first_revenue_postmortem()
+        if postmortem:
+            lines += ["", *postmortem]
 
         review = self.diagnostic_review()
         if review:

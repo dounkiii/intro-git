@@ -181,3 +181,82 @@ def test_自アカウントの分布が判定器に渡される(tmp_path):
 
     assert diagnoser.baseline == 1000.0
     assert diagnoser.distribution_floor()[1] == "own_baseline"
+
+
+# --- 異常の連続検知と再開条件 -------------------------------------------------
+def test_運用異常がコードで検出される(tmp_path):
+    ledger = ExperimentLedger(tmp_path)
+    for i in range(5):
+        ledger.record_prediction(_opportunity(f"o{i}"), f"n{i}")
+
+    anomalies = ledger.detect_anomalies()
+
+    assert "publish_zero" in anomalies
+
+
+def test_同じ異常が2回連続すると連続回数が出る(tmp_path):
+    """前回のレビュー結果を保存していないと判定できないので台帳に残す。"""
+    ledger = ExperimentLedger(tmp_path)
+    for i in range(5):
+        ledger.record_prediction(_opportunity(f"o{i}"), f"n{i}")
+    first = ledger.diagnostic_review()
+
+    for i in range(5, 10):
+        ledger.record_prediction(_opportunity(f"o{i}"), f"n{i}")
+    second = ledger.diagnostic_review()
+
+    assert "2回連続" not in "\n".join(first)
+    assert "2回連続" in "\n".join(second)
+    assert "20件を待たずに点検" in "\n".join(second)
+
+
+def test_異常が解消されれば連続はリセットされる(tmp_path):
+    ledger = ExperimentLedger(tmp_path)
+    for i in range(5):
+        ledger.record_prediction(_opportunity(f"o{i}"), f"n{i}")
+    ledger.diagnostic_review()
+    # 公開されたので publish_zero は解消
+    for i in range(5):
+        ledger.record_outcome(FunnelMetrics(f"n{i}", posts=5, impressions=3000))
+    for i in range(5, 10):
+        ledger.record_prediction(_opportunity(f"o{i}"), f"n{i}")
+
+    assert "publish_zero" not in ledger.detect_anomalies()
+
+
+def test_直してよい異常と触らない異常が分けて出る(tmp_path):
+    """アルゴリズムを20件未満で触らせないための線引き。"""
+    ledger = ExperimentLedger(tmp_path)
+    for i in range(5):
+        ledger.record_prediction(_opportunity(f"o{i}"), f"n{i}")
+        ledger.record_outcome(FunnelMetrics(f"n{i}", posts=8, impressions=300),
+                              creatives_tried=3)
+
+    report = "\n".join(ledger.diagnostic_review())
+
+    assert "記録のみ（アルゴリズムは20件まで触らない）" in report
+    assert "触りません" in report or "20件まで触らない" in report
+
+
+def test_初売上の振り返りが出る(tmp_path):
+    """配点を変える前に事実を記録するためのレポート。"""
+    ledger = ExperimentLedger(tmp_path)
+    ledger.record_prediction(_opportunity("w"), "n_w", commitment="CHEAP_TEST")
+    ledger.record_outcome(FunnelMetrics("n_w", posts=3, impressions=400))
+    ledger.record_outcome(FunnelMetrics("n_w", posts=8, impressions=6000,
+                                        conversions=1, revenue_jpy=3200))
+
+    report = "\n".join(ledger.first_revenue_postmortem())
+
+    for expected in ("何が売れたか", "通った Stage", "候補の種類",
+                     "採用時の投資レベル", "換金の根拠", "再現性の確認"):
+        assert expected in report
+    assert "Stage1 → Stage5" in report or "Stage0" in report
+
+
+def test_売上がなければ振り返りは出ない(tmp_path):
+    ledger = ExperimentLedger(tmp_path)
+    ledger.record_prediction(_opportunity("a"), "n_a")
+    ledger.record_outcome(FunnelMetrics("n_a", posts=8, impressions=3000))
+
+    assert ledger.first_revenue_postmortem() == []

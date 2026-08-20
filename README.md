@@ -14,6 +14,8 @@
 | **制作** (`src/`) | 採用ニッチで台本・記事・動画を生成し投稿 | `/approve <id>` 出すか出さないか | 毎日3〜5分 |
 | **検証** (`src/scout/ledger.py`) | 予測を凍結し、実績と突き合わせて配点を校正 | `/m <niche> <views> <revenue>` | 週1回30秒 |
 
+⚙️ **運用の契約**: [docs/OPERATIONS.md](docs/OPERATIONS.md)（**設計は凍結済み**。
+アルゴリズムを触ってよい3条件と、触ってはいけないものの線引き）
 📘 **戦略**: [docs/PLAYBOOK.md](docs/PLAYBOOK.md)（収益条件の実数・90日プラン・地雷リスト）
 🔎 **探索レイヤ設計**: [docs/RESEARCH_SYSTEM.md](docs/RESEARCH_SYSTEM.md)（評価軸・実測補正・データ構造）
 📱 **運用手順**: [docs/PHONE_OPS.md](docs/PHONE_OPS.md)（セットアップと毎朝のルーティン）
@@ -227,6 +229,7 @@ pytest -q
 
 ```
 docs/
+  OPERATIONS.md        運用フェーズの契約（再開条件と変更禁止範囲）
   PLAYBOOK.md          戦略・収益条件の実数・90日プラン・地雷リスト
   RESEARCH_SYSTEM.md   探索レイヤ設計（評価軸・実測補正・データ構造）
   PHONE_OPS.md         セットアップと通勤中の運用手順
