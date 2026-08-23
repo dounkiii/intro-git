@@ -64,10 +64,14 @@ def parse_commands(comment_body: str) -> list[Command]:
     return commands
 
 
-def render_approval_issue(items: list[tuple[ReviewItem, dict]]) -> str:
+def render_approval_issue(items: list[tuple[ReviewItem, dict]],
+                          api_key_env: str | None = None) -> str:
     """承認 Issue の本文を組む。
 
     items は (ReviewItem, article_dict) の組。article_dict は記事の to_dict()。
+    `api_key_env` は設定中の LLM プロバイダの API キー環境変数名。テンプレに
+    落ちたときに直すべきキーを名指しするために渡す。プロバイダを差し替えたのに
+    別のキーを案内すると、オーナーが直せない場所を確認しにいくことになる。
     通勤中に読める密度に抑えるため、台本と記事本文は <details> で畳む。
     """
     if not items:
@@ -97,7 +101,11 @@ def render_approval_issue(items: list[tuple[ReviewItem, dict]]) -> str:
         route = article.get("monetization_route", "なし")
         route_text = route if route != "なし" else "⚠️ なし（AFF_* Secrets を確認）"
         gen = script.get("generated_by", "template")
-        gen_text = "Claude" if gen == "claude" else "⚠️ テンプレ（ANTHROPIC_API_KEY 未設定）"
+        if gen == "template":
+            missing = f"（{api_key_env} 未設定）" if api_key_env else "（LLM の API キー未設定）"
+            gen_text = f"⚠️ テンプレ{missing}"
+        else:
+            gen_text = gen
 
         body.extend([
             f"### `{item.id}`",

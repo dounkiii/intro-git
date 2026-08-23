@@ -85,11 +85,14 @@ jobs:
         run: |
           git config user.name  'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
-          git pull --rebase --autostash origin "${{ github.event.repository.default_branch }}" || true
           git add -A data/
           if git diff --cached --quiet; then
             echo "変更なし"
-          else
-            git commit -m "chore: 承認結果を反映 (issue #${{ github.event.issue.number }})"
-            git push
+            exit 0
           fi
+          git commit -m "chore: 承認結果を反映 (issue #${{ github.event.issue.number }})"
+          # 先にコミットしてから rebase する。他のワークフローや手元からの push と
+          # 競合したときに、pull を省くと push が拒否されて状態が失われる。
+          # `|| true` で握り潰さないのは、衝突したまま push すると状態が壊れるため。
+          git pull --rebase origin "${{ github.ref_name }}"
+          git push

@@ -130,7 +130,8 @@ class Pipeline:
         from datetime import date
 
         title = f"承認キュー {date.today().isoformat()}（{len(cards)}件）"
-        body = render_approval_issue(cards)
+        body = render_approval_issue(
+            cards, api_key_env=getattr(self.summarizer.llm, "api_key_env", None))
         self.issues.create_issue(title, body)
 
     # ------------------------------------------------------------------

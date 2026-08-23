@@ -153,3 +153,60 @@ def test_承認ワークフローがレポートのラベルで起動しない()
     report_label = Config.load().section("approval")["report_label"]
 
     assert f"'{report_label}'" not in workflow
+
+
+def test_承認Issueは実際に生成したプロバイダを出す(tmp_path):
+    """Claude 以外で生成したものを「Claude」と表示すると、承認画面で品質を
+    判断する材料が壊れる。実績を見るときに Claude 期と Gemini 期も混ざる。"""
+    queue = ReviewQueue(tmp_path)
+    script = VideoScript(topic_category="tax", title="t", slides=["a"],
+                         narration=["a"], generated_by="gemini")
+    queue.enqueue("tax-1", script, video_path="/tmp/x.mp4", safety_flags=[],
+                  category="tax")
+    item = queue.get("tax-1")
+
+    body = render_approval_issue([(item, {"monetization_route": "なし"})])
+
+    assert "gemini" in body
+    assert "Claude" not in body
+
+
+def test_テンプレ落ちは設定中のプロバイダのキーを名指しする(tmp_path):
+    """プロバイダを差し替えたのに別のキーを案内すると、オーナーが直せない
+    場所を確認しにいくことになる。"""
+    queue = ReviewQueue(tmp_path)
+    _enqueue(queue, "tax-1", [])
+    item = queue.get("tax-1")
+
+    body = render_approval_issue([(item, {"monetization_route": "なし"})],
+                                 api_key_env="GEMINI_API_KEY")
+
+    assert "GEMINI_API_KEY 未設定" in body
+    assert "ANTHROPIC_API_KEY" not in body
+
+
+def test_全プロバイダがキーの環境変数名を持つ():
+    """承認 Issue がテンプレ落ちの原因を名指しするために必要。プロバイダを
+    足したときに漏れると、案内が「LLM の API キー未設定」に退化する。"""
+    from src.llm.claude import ClaudeClient
+    from src.llm.gemini import GeminiClient
+
+    for client in (ClaudeClient, GeminiClient):
+        assert client.api_key_env
+        assert client.provider
+
+
+def test_状態をコミットするワークフローは_push_前に_pull_する():
+    """pull を省くと、他のワークフローや手元からの push と競合したときに
+    push が拒否され、その回の探索結果や承認結果が失われる。"""
+    import pathlib
+
+    for name in ("daily-scout.yml", "daily-generate.yml", "approve-command.yml"):
+        text = pathlib.Path(".github/workflows", name).read_text(encoding="utf-8")
+        if "git push" not in text:
+            continue
+        pull = text.index("git pull --rebase")
+        push = text.index("git push")
+        assert pull < push, name
+        # 衝突を握り潰したまま push すると状態が壊れる
+        assert "git pull --rebase origin \"${{ github.ref_name }}\"" in text, name

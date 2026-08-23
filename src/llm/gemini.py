@@ -55,6 +55,8 @@ class GeminiClient:
     """Gemini generateContent の薄いラッパー。ClaudeClient と同じ3メソッドを持つ。"""
 
     provider = "gemini"
+    # 未設定のときに承認 Issue で案内する環境変数名
+    api_key_env = "GEMINI_API_KEY"
 
     def __init__(self, api_key: str, model: str = "gemini-3.6-flash",
                  effort: str = "medium", max_tokens: int = 8000,

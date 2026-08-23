@@ -19,6 +19,8 @@ class ClaudeClient:
     """Claude Messages API の薄いラッパー。JSON スキーマ準拠の dict を返す。"""
 
     provider = "claude"
+    # 未設定のときに承認 Issue で案内する環境変数名
+    api_key_env = "ANTHROPIC_API_KEY"
 
     def __init__(self, api_key: str, model: str = "claude-opus-5",
                  effort: str = "medium", max_tokens: int = 8000):

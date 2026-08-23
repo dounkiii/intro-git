@@ -75,7 +75,11 @@ jobs:
           git add -A data/
           if git diff --cached --quiet; then
             echo "変更なし"
-          else
-            git commit -m "chore: 承認キューを更新 ($(date -u +%Y-%m-%d))"
-            git push
+            exit 0
           fi
+          git commit -m "chore: 承認キューを更新 ($(date -u +%Y-%m-%d))"
+          # 先にコミットしてから rebase する。他のワークフローや手元からの push と
+          # 競合したときに、pull を省くと push が拒否されて状態が失われる。
+          # `|| true` で握り潰さないのは、衝突したまま push すると状態が壊れるため。
+          git pull --rebase origin "${{ github.ref_name }}"
+          git push

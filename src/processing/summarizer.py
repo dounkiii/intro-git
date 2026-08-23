@@ -1,11 +1,13 @@
 """動画スクリプトとアフィリエイト記事の生成。
 
 生成は 2 段構え:
-  1. `ANTHROPIC_API_KEY` があれば Claude API（`src/llm/claude.py`）で生成
-  2. 無い / 失敗した場合はテンプレートベースの決定論的生成にフォールバック
+  1. `config.yaml` の `llm.provider` で選んだプロバイダ（`src/llm/`）で生成
+  2. キーが無い / 失敗した場合はテンプレートベースの決定論的生成にフォールバック
 
 フォールバックを残しているのは、毎朝の cron が API 障害 1 回で止まらないようにするため。
 ただしテンプレ出力は日本語として不自然なので、承認カードには `generated_by` が出る。
+`generated_by` には実際に生成したプロバイダ名を入れる。プロバイダを変えると文章の
+品質分布が変わるので、あとで実績を見るときに Claude 期と Gemini 期を混ぜないため。
 
 収益化ブロック（アフィリ CTA / PR表記 / 免責）は `src/monetize/affiliate.py` が
 すべての成果物に強制注入する。換金経路のないコンテンツは作らない方針。
@@ -66,12 +68,12 @@ class Summarizer:
 
     # ------------------------------------------------------------------
     def build_script(self, topic: Topic) -> VideoScript:
-        """動画スクリプトを生成する。Claude 優先、失敗時テンプレ。"""
+        """動画スクリプトを生成する。LLM 優先、失敗時テンプレ。"""
         block = self.affiliate.build(topic.category)
         data = self._script_via_claude(topic) if self.llm.available else None
         if data:
             script = self._script_from_data(topic, data, block)
-            script.generated_by = "claude"
+            script.generated_by = self.llm.provider
             return script
         return self._script_from_template(topic, block)
 
@@ -83,7 +85,7 @@ class Summarizer:
         if data:
             body = data.get("body_markdown", "")
             title = data.get("title") or script.title
-            generated_by = "claude"
+            generated_by = self.llm.provider
         else:
             title, body = self._article_from_template(topic, script)
             generated_by = "template"
