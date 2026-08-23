@@ -210,3 +210,26 @@ def test_状態をコミットするワークフローは_push_前に_pull_す�
         assert pull < push, name
         # 衝突を握り潰したまま push すると状態が壊れる
         assert "git pull --rebase origin \"${{ github.ref_name }}\"" in text, name
+
+
+def test_台本の指示に尺の上下限が入る():
+    """下限だけ伝えると LLM は上限を知らないまま長く書き、builder は警告する
+    だけで切り詰めないので、config の max_duration_sec が効かなくなる。"""
+    from src.config import Config
+    from src.models import Tweet, Topic
+    from src.processing.summarizer import Summarizer
+
+    config = Config.load()
+    video = config.section("video")
+    summarizer = Summarizer(config)
+    topic = Topic(category="tax", headline="t", score=1.0, tweets=[
+        Tweet(id="1", text="本文", author="a", url="https://example.com",
+              created_at="", likes=1, retweets=0, replies=0)])
+
+    captured: dict = {}
+    summarizer.llm.generate_json = (
+        lambda system, prompt, schema: captured.setdefault("prompt", prompt))
+    summarizer._script_via_claude(topic)
+
+    assert str(video["min_duration_sec"]) in captured["prompt"]
+    assert str(video["max_duration_sec"]) in captured["prompt"]

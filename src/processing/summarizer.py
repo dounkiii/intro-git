@@ -62,6 +62,7 @@ class Summarizer:
         video = config.section("video")
         self.slide_count = int(video.get("slides_per_video", 6))
         self.min_duration = int(video.get("min_duration_sec", 62))
+        self.max_duration = int(video.get("max_duration_sec", 90))
         self.policy: str = config.section("llm").get("editorial_policy", "")
         self.affiliate = AffiliateEngine(config)
         self.llm = config.llm_client()
@@ -135,8 +136,9 @@ class Summarizer:
 
 【要件】
 - slides と narration は必ず同じ要素数（{self.slide_count}個）にする
-- narration は全部読んで {self.min_duration}秒以上になる長さにする
-  （TikTok の収益化対象は1分以上の動画なので、短くしない）
+- narration は全部読んで {self.min_duration}〜{self.max_duration}秒に収まる長さにする
+  （下限: TikTok の収益化対象は1分以上の動画なので短くしない。
+    上限: 超えると builder が警告するだけで切り詰められず、尺が伸び続ける）
 - hook は冒頭2秒で流し見を止める1文。煽らず、損得か期限を示す
 - slides は画面に出す短いテキスト（各30字以内）
 - narration は読み上げ文。話し言葉で書く
