@@ -146,3 +146,109 @@ def test_どのプロバイダの予測かが台帳に残る(tmp_path):
     assert prediction.llm_provider == "gemini"
     assert prediction.llm_model == "gemini-2.5-flash"
     assert ledger.rows("prediction")[0]["llm_provider"] == "gemini"
+
+
+# --- リトライとスロットリング -------------------------------------------------
+class _FakeResponse:
+    def __init__(self, status: int, payload: dict | None = None):
+        self.status_code = status
+        self._payload = payload or {}
+
+    def json(self):
+        return self._payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            import requests
+
+            raise requests.HTTPError(response=self)
+
+
+def _client(monkeypatch, responses: list, **kwargs):
+    """`responses` を順に返す偽の requests.post を仕込んだクライアントを返す。"""
+    import src.llm.gemini as gemini
+
+    calls: list[float] = []
+    monkeypatch.setattr(gemini.time, "sleep", lambda s: calls.append(s))
+    monkeypatch.setattr(gemini.requests, "post",
+                        lambda *a, **k: responses.pop(0))
+    client = GeminiClient(api_key="dummy", min_interval=0, **kwargs)
+    return client, calls
+
+
+OK_BODY = {"candidates": [{"content": {"parts": [{"text": '{"a": 1}'}]}}]}
+
+
+def test_レート上限は待って再試行する(monkeypatch):
+    """429 で1回諦めると「未採点」に落ちる。1日1回のジョブなら待つ余裕がある。"""
+    responses = [_FakeResponse(429, {"error": {"message": "rate"}}),
+                 _FakeResponse(200, OK_BODY)]
+    client, sleeps = _client(monkeypatch, responses)
+
+    result = client.generate_json("s", "p", {"type": "object"})
+
+    assert result == {"a": 1}
+    assert len(sleeps) == 1          # 1回待った
+
+
+def test_高負荷の503も再試行する(monkeypatch):
+    responses = [_FakeResponse(503, {"error": {"message": "high demand"}}),
+                 _FakeResponse(200, OK_BODY)]
+    client, _ = _client(monkeypatch, responses)
+
+    assert client.generate_json("s", "p", {"type": "object"}) == {"a": 1}
+
+
+def test_サーバー指定の待ち時間を優先する(monkeypatch):
+    """retryDelay があれば自前のバックオフより優先する。"""
+    responses = [
+        _FakeResponse(429, {"error": {"message": "rate",
+                                      "details": [{"retryDelay": "27s"}]}}),
+        _FakeResponse(200, OK_BODY),
+    ]
+    client, sleeps = _client(monkeypatch, responses)
+
+    client.generate_json("s", "p", {"type": "object"})
+
+    assert sleeps == [27.0]
+
+
+def test_再試行しても駄目なら諦める(monkeypatch):
+    responses = [_FakeResponse(429, {"error": {"message": "rate"}}) for _ in range(3)]
+    client, sleeps = _client(monkeypatch, responses, max_retries=2)
+
+    assert client.generate_json("s", "p", {"type": "object"}) is None
+    assert len(sleeps) == 2
+
+
+def test_モデル名の404は再試行しない(monkeypatch):
+    """設定ミスなので待っても直らない。即座に諦めて警告を出す。"""
+    responses = [_FakeResponse(404, {"error": {"message": "no longer available"}})]
+    client, sleeps = _client(monkeypatch, responses)
+
+    assert client.generate_json("s", "p", {"type": "object"}) is None
+    assert sleeps == []              # 待っていない
+
+
+def test_バックオフは上限内で増える():
+    delays = [GeminiClient._backoff(i) for i in range(5)]
+
+    assert delays == sorted(delays)
+    assert all(d <= 63 for d in delays)
+
+
+def test_呼び出し間隔を空ける(monkeypatch):
+    """無料枠は分あたりの制限が厳しく、連続で投げると1回目から429になる。"""
+    import src.llm.gemini as gemini
+
+    slept: list[float] = []
+    monkeypatch.setattr(gemini.time, "sleep", lambda s: slept.append(s))
+    monkeypatch.setattr(gemini.requests, "post",
+                        lambda *a, **k: _FakeResponse(200, OK_BODY))
+    client = GeminiClient(api_key="dummy", min_interval=6.0)
+
+    client.generate_json("s", "p", {"type": "object"})   # 1回目は待たない
+    assert slept == []
+
+    client.generate_json("s", "p", {"type": "object"})   # 2回目は間隔を空ける
+    assert slept and slept[0] > 0

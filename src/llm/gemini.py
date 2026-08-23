@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import json
 import logging
+import random
+import time
 from typing import Any
 
 import requests
@@ -34,6 +36,9 @@ UNSUPPORTED_SCHEMA_KEYS = ("additionalProperties", "minimum", "maximum",
 # effort（Claude 側の概念）を思考予算に読み替える。0 で思考を切る。
 EFFORT_THINKING_BUDGET = {"low": 0, "medium": 2048, "high": 8192,
                           "xhigh": 16384, "max": 24576}
+
+# 再試行する HTTP ステータス。429=レート上限、503=一時的な高負荷、500/502/504=一時障害。
+RETRYABLE_STATUS = (429, 500, 502, 503, 504)
 
 
 def _sanitize_schema(schema: Any) -> Any:
@@ -53,48 +58,116 @@ class GeminiClient:
 
     def __init__(self, api_key: str, model: str = "gemini-3.6-flash",
                  effort: str = "medium", max_tokens: int = 8000,
-                 timeout: int = 120):
+                 timeout: int = 120, max_retries: int = 3,
+                 min_interval: float = 6.0):
+        """`min_interval` は連続呼び出しの最小間隔（秒）。
+
+        無料枠は分あたりの回数制限が厳しく、間を空けずに投げると 1 回目から
+        429 になる。1日1回のジョブなので待つ余裕はある。
+        """
         self.api_key = api_key
         self.model = model
         self.effort = effort
         self.max_tokens = max_tokens
         self.timeout = timeout
+        self.max_retries = max_retries
+        self.min_interval = min_interval
+        self._last_call_at = 0.0
 
     @property
     def available(self) -> bool:
         return bool(self.api_key)
 
     # ------------------------------------------------------------------
+    def _throttle(self) -> None:
+        """前回の呼び出しから `min_interval` 秒空ける。無料枠の分あたり制限対策。"""
+        if self.min_interval <= 0:
+            return
+        wait = self.min_interval - (time.monotonic() - self._last_call_at)
+        if wait > 0 and self._last_call_at:
+            time.sleep(wait)
+
     def _post(self, payload: dict) -> dict | None:
-        try:
-            resp = requests.post(
-                f"{API_ROOT}/{self.model}:generateContent",
-                params={"key": self.api_key},
-                json=payload, timeout=self.timeout,
-            )
-            resp.raise_for_status()
-            return resp.json()
-        except requests.HTTPError as exc:
-            status = exc.response.status_code if exc.response is not None else "?"
-            detail = ""
+        """429 / 503 は待って再試行する。それ以外のエラーは即座に諦める。
+
+        再試行を入れているのは、1日1回のジョブなので待つ時間の余裕があるのに、
+        一時的なレート上限や高負荷で「未採点」に落ちるのが損だから。
+        """
+        for attempt in range(self.max_retries + 1):
+            self._throttle()
+            self._last_call_at = time.monotonic()
             try:
-                detail = exc.response.json().get("error", {}).get("message", "")[:300]
-            except Exception:
-                pass
-            if status == 404 and "no longer available" in detail:
-                logger.warning("モデル名が古くなっています。config.yaml の "
-                               "llm.gemini_model を上のメッセージが示す名前に変更して"
-                               "ください。")
-            elif status == 429:
-                logger.warning("Gemini の無料枠のレート上限に当たりました。"
-                               "config.yaml の scout.research_limit を下げてください。")
-            else:
-                logger.warning("Gemini API がエラーを返しました（%s）: %s", status, detail)
-            return None
-        except requests.RequestException as exc:
-            logger.warning("Gemini API 呼び出しに失敗しました（%s）。テンプレ生成に"
-                           "切り替えます。", type(exc).__name__)
-            return None
+                resp = requests.post(
+                    f"{API_ROOT}/{self.model}:generateContent",
+                    params={"key": self.api_key},
+                    json=payload, timeout=self.timeout,
+                )
+                resp.raise_for_status()
+                return resp.json()
+            except requests.HTTPError as exc:
+                status = exc.response.status_code if exc.response is not None else 0
+                detail, retry_after = self._error_detail(exc.response)
+
+                if status in RETRYABLE_STATUS and attempt < self.max_retries:
+                    delay = retry_after or self._backoff(attempt)
+                    logger.warning("Gemini が %s を返しました。%.0f秒待って再試行します"
+                                   "（%d/%d）: %s", status, delay, attempt + 1,
+                                   self.max_retries, detail or "-")
+                    time.sleep(delay)
+                    continue
+
+                self._log_final_error(status, detail)
+                return None
+            except requests.RequestException as exc:
+                if attempt < self.max_retries:
+                    delay = self._backoff(attempt)
+                    logger.warning("Gemini への接続に失敗（%s）。%.0f秒待って再試行します"
+                                   "（%d/%d）。", type(exc).__name__, delay,
+                                   attempt + 1, self.max_retries)
+                    time.sleep(delay)
+                    continue
+                logger.warning("Gemini API 呼び出しに失敗しました（%s）。テンプレ生成に"
+                               "切り替えます。", type(exc).__name__)
+                return None
+        return None
+
+    @staticmethod
+    def _backoff(attempt: int) -> float:
+        """指数バックオフ + ジッタ。同時実行が揃って再試行するのを避ける。"""
+        return min(60.0, 5.0 * (2 ** attempt)) + random.uniform(0, 3)
+
+    @staticmethod
+    def _error_detail(response) -> tuple[str, float | None]:
+        """エラー本文と、サーバーが指定した再試行待ち秒数を取り出す。"""
+        if response is None:
+            return "", None
+        try:
+            error = response.json().get("error", {})
+        except Exception:
+            return "", None
+
+        retry_after = None
+        for item in error.get("details", []) or []:
+            raw = item.get("retryDelay")
+            if isinstance(raw, str) and raw.endswith("s"):
+                try:
+                    retry_after = float(raw[:-1])
+                except ValueError:
+                    pass
+        return error.get("message", "")[:300], retry_after
+
+    @staticmethod
+    def _log_final_error(status: int, detail: str) -> None:
+        if status == 404 and "no longer available" in detail:
+            logger.warning("Gemini API がエラーを返しました（404）: %s", detail)
+            logger.warning("モデル名が古くなっています。config.yaml の "
+                           "llm.gemini_model を上のメッセージが示す名前に変更してください。")
+        elif status == 429:
+            logger.warning("Gemini の無料枠のレート上限に当たりました（再試行しても"
+                           "解消せず）。config.yaml の scout.research_limit を下げるか、"
+                           "llm.min_interval_seconds を上げてください。")
+        else:
+            logger.warning("Gemini API がエラーを返しました（%s）: %s", status, detail)
 
     def _generation_config(self, extra: dict | None = None) -> dict:
         config: dict[str, Any] = {"maxOutputTokens": self.max_tokens}

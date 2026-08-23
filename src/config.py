@@ -95,8 +95,10 @@ class Config:
 
             return GeminiClient(
                 api_key=self.gemini_api_key,
-                model=llm.get("gemini_model", "gemini-2.5-flash"),
+                model=llm.get("gemini_model", "gemini-3.6-flash"),
                 effort=effort, max_tokens=max_tokens,
+                max_retries=int(llm.get("max_retries", 3)),
+                min_interval=float(llm.get("min_interval_seconds", 6)),
             )
 
         if provider == "claude":
