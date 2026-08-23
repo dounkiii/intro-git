@@ -93,6 +93,17 @@ monetization の重み（1.0/0.6/0.2） / percentile 化 / 回帰 / 機械学習
 
 ---
 
+## LLM プロバイダ
+
+既定は **Gemini（無料枠）**。`config.yaml` の `llm.provider` で `claude` に切替可。
+差し替えは凍結対象ではありません（アルゴリズムではなくアダプタ）。理由と経緯は
+`docs/RESEARCH_SYSTEM.md` の第7ラウンド。
+
+- 必要な環境変数: `GEMINI_API_KEY`（https://aistudio.google.com/apikey・カード不要）
+- 無料枠の上限に当たったら `config.yaml` の `scout.research_limit` を下げる
+- プロバイダは予測行（`llm_provider` / `llm_model`）に記録される。
+  **Claude 期と Gemini 期の予測を同じデータとして校正しないこと**
+
 ## 開発コマンド
 
 ```bash

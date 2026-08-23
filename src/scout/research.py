@@ -85,7 +85,7 @@ class Researcher:
         known = [{"url": u, "title": ""} for u in candidate.evidence_urls]
         if not self.available:
             # 調査していなくても、発掘元が持っていた URL は実測値として残す
-            return Research(competitor_note="未調査（ANTHROPIC_API_KEY 未設定）",
+            return Research(competitor_note="未調査（LLM の API キー未設定）",
                             sources=list(candidate.evidence_urls),
                             measured=self.measure(known, candidate.keywords))
 

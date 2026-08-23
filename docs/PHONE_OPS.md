@@ -76,7 +76,7 @@ Issue に案件ごとにこういうブロックが並ぶ。
 
 | Secret | 説明 |
 |---|---|
-| `ANTHROPIC_API_KEY` | Claude API キー（[console.anthropic.com](https://console.anthropic.com/)） |
+| `GEMINI_API_KEY` | Gemini API キー（[aistudio.google.com/apikey](https://aistudio.google.com/apikey)）。**カード登録不要・無料枠** |
 
 **収益化に必要（アフィリ審査が通ってから）:**
 

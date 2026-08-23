@@ -42,6 +42,7 @@ class Config:
     x_bearer_token: str = ""
     tiktok_access_token: str = ""
     anthropic_api_key: str = ""
+    gemini_api_key: str = ""
 
     # GitHub（承認 Issue の作成・更新に使う。Actions 内では自動で入る）
     github_token: str = ""
@@ -67,6 +68,7 @@ class Config:
             x_bearer_token=os.getenv("X_BEARER_TOKEN", ""),
             tiktok_access_token=os.getenv("TIKTOK_ACCESS_TOKEN", ""),
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
+            gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
             github_token=os.getenv("GITHUB_TOKEN", ""),
             github_repository=os.getenv("GITHUB_REPOSITORY", ""),
             dry_run=_bool_env("DRY_RUN", True),
@@ -77,14 +79,33 @@ class Config:
         return self.raw.get(name, {}) or {}
 
     def llm_client(self):
-        """設定に従った ClaudeClient を返す。キー未設定でも生成し、呼び出し側は
-        `available` を見てテンプレ生成にフォールバックする。"""
-        from .llm import ClaudeClient
+        """`llm.provider` に従ったクライアントを返す。
 
+        キー未設定でも生成し、呼び出し側は `available` を見てテンプレ生成に
+        フォールバックする。プロバイダは凍結対象ではない（アルゴリズムではなく
+        アダプタなので、docs/OPERATIONS.md §3 に含まれない）。
+        """
         llm = self.section("llm")
-        return ClaudeClient(
-            api_key=self.anthropic_api_key,
-            model=llm.get("model", "claude-opus-5"),
-            effort=llm.get("effort", "medium"),
-            max_tokens=int(llm.get("max_tokens", 8000)),
-        )
+        provider = (llm.get("provider") or "gemini").lower()
+        effort = llm.get("effort", "medium")
+        max_tokens = int(llm.get("max_tokens", 8000))
+
+        if provider == "gemini":
+            from .llm import GeminiClient
+
+            return GeminiClient(
+                api_key=self.gemini_api_key,
+                model=llm.get("gemini_model", "gemini-2.5-flash"),
+                effort=effort, max_tokens=max_tokens,
+            )
+
+        if provider == "claude":
+            from .llm import ClaudeClient
+
+            return ClaudeClient(
+                api_key=self.anthropic_api_key,
+                model=llm.get("model", "claude-sonnet-5"),
+                effort=effort, max_tokens=max_tokens,
+            )
+
+        raise ValueError(f"未知の llm.provider です: {provider}（gemini | claude）")

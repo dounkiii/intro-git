@@ -105,8 +105,12 @@ scout:
     extra_body: {}
 
 llm:
-  # 台本・記事の生成に使うモデル。未設定の ANTHROPIC_API_KEY 時はテンプレにフォールバック。
-  model: 'claude-opus-5'
+  # プロバイダ。無料枠で運用できるのが Gemini だけなので既定にしている。
+  # 初売上が出たら claude に戻す想定（アダプタは残してある）。
+  # プロバイダは凍結対象ではない（docs/OPERATIONS.md §3 に含まれない）。
+  provider: 'gemini'      # gemini | claude
+  gemini_model: 'gemini-2.5-flash'   # 無料枠のあるモデル
+  model: 'claude-sonnet-5'           # provider: claude のときに使う
   effort: 'medium'        # low | medium | high | xhigh | max
   max_tokens: 8000
   # 断定を避け、出典と免責を必ず付けさせるための方針（システムプロンプトに合成される）

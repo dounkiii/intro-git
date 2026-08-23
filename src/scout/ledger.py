@@ -82,6 +82,10 @@ class Prediction:
     best_product: str = ""
     mapping_version: str = ""
     speculative_rule_version: str = ""
+    # どの LLM が出した推測かを記録する。プロバイダを変えると inferred スコアの
+    # 分布が変わるので、校正時に別物として扱えるようにしておく。
+    llm_provider: str = ""
+    llm_model: str = ""
     commitment: str = ""
     speculative: bool = False
     # 予測値。実績と1対1で突き合わせるための項目名にしてある。
@@ -169,7 +173,8 @@ class ExperimentLedger:
 
     # ------------------------------------------------------------------
     def record_prediction(self, opportunity, niche_slug: str,
-                          commitment: str = "") -> Prediction:
+                          commitment: str = "", llm_provider: str = "",
+                          llm_model: str = "") -> Prediction:
         """採用時の予測を凍結する。同じ機会に対しては1回だけ書く。"""
         existing = {r.get("opportunity_id") for r in self.rows("prediction")}
         if opportunity.id in existing:
@@ -188,6 +193,7 @@ class ExperimentLedger:
             best_product=opportunity.research.best_product,
             mapping_version=MAPPING_VERSION,
             speculative_rule_version=SPECULATIVE_RULE_VERSION,
+            llm_provider=llm_provider, llm_model=llm_model,
             commitment=commitment, speculative=s.speculative,
             predicted_total=s.total, predicted_llm_total=s.llm_total,
             predicted_discovery=s.discovery, predicted_business=s.business,
@@ -714,6 +720,7 @@ class ExperimentLedger:
                 "predicted_total": p.get("predicted_total", 0),
                 "predicted_low_competition": p.get("predicted_low_competition", 0),
                 "monetization_source": p.get("monetization_source", ""),
+                "llm": f"{p.get('llm_provider', '?')}/{p.get('llm_model', '?')}",
                 "actual_rpm": round(FunnelMetrics(**{
                     k: v for k, v in m.items()
                     if k in FunnelMetrics.__dataclass_fields__}).rpm, 1) if m else 0.0,

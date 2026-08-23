@@ -71,8 +71,9 @@ class Pipeline:
         topics = self._apply_item_caps(topics)[:limit]
 
         if not self.summarizer.llm.available:
-            logger.warning("ANTHROPIC_API_KEY が未設定のため、テンプレ生成で動作します。"
-                           "文章の品質は上がりません。")
+            logger.warning("LLM の API キーが未設定のため、テンプレ生成で動作します"
+                           "（provider=%s）。文章の品質は上がりません。",
+                           getattr(self.summarizer.llm, "provider", "?"))
 
         item_ids: list[str] = []
         cards: list[tuple] = []

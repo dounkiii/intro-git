@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 class ClaudeClient:
     """Claude Messages API の薄いラッパー。JSON スキーマ準拠の dict を返す。"""
 
+    provider = "claude"
+
     def __init__(self, api_key: str, model: str = "claude-opus-5",
                  effort: str = "medium", max_tokens: int = 8000):
         self.api_key = api_key

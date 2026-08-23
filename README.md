@@ -208,7 +208,8 @@ python -m src.pipeline calibrate
 
 | 変数 | 説明 |
 |------|------|
-| `ANTHROPIC_API_KEY` | Claude API キー。**これだけで動く**（未設定時はテンプレ生成にフォールバック） |
+| `GEMINI_API_KEY` | Gemini API キー。**これだけで動く**（[取得](https://aistudio.google.com/apikey)・カード不要・無料枠） |
+| `ANTHROPIC_API_KEY` | `config.yaml` の `llm.provider: claude` にしたときに使う |
 | `AFF_HUB_URL` 他 `AFF_*` | アフィリリンク。空のスロットを指す案件は自動スキップ |
 | `X_BEARER_TOKEN` | X API v2。収集と兆候発掘。未設定ならサンプルで動く |
 | `XAI_API_KEY` | Grok (xAI) 発掘。任意（`scout.grok.enabled: true` で有効化） |
@@ -242,7 +243,8 @@ docs/
   tests.yml            pytest
 src/
   config.py                設定・環境変数の読み込み
-  llm/claude.py            Claude API（生成 / web_search 調査）。失敗時はフォールバック
+  llm/gemini.py            Gemini API（既定。無料枠・Google検索グラウンディング）
+  llm/claude.py            Claude API（provider: claude のとき）。失敗時はフォールバック
   scout/                   === 探索レイヤ ===
     sources/x_api.py       X API から需要の兆候 + いいね/時間の実測
     sources/grok.py        Grok (xAI) 発掘。任意・無効可

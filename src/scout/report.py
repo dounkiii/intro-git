@@ -61,7 +61,7 @@ def render_opportunity(opportunity: Opportunity, rank: int) -> str:
     ]
 
     if not s.scored:
-        lines += ["", "> ⚠️ **未採点** — `ANTHROPIC_API_KEY` が未設定か生成に失敗したため、"
+        lines += ["", "> ⚠️ **未採点** — LLM の API キーが未設定か生成に失敗したため、"
                       "スコアは 0 のままです。数値を判断に使わないでください。"]
     if s.conflicts:
         lines += ["", "> ⚠️ **LLMと実測の食い違い**", *[f"> - {x}" for x in s.conflicts]]

@@ -78,7 +78,7 @@ class ScoutPipeline:
         logger.info("重複統合: 調査対象 %d件 / 既存の観測更新 %d件", len(fresh), len(touched))
 
         if not self.researcher.available:
-            logger.warning("ANTHROPIC_API_KEY が未設定です。裏取りと採点は行われません。"
+            logger.warning("LLM の API キーが未設定です。裏取りと採点は行われません。"
                            "候補の一覧だけが出力されます。")
 
         # 調査はコストがかかるので、伸びの速い順に上位だけ深掘りする
@@ -159,7 +159,11 @@ class ScoutPipeline:
         self.store.set_status(opportunity_id, "adopted")
 
         # 予測を凍結する。以後書き換えないので、後から「予測が当たったか」を検証できる。
-        self.ledger.record_prediction(opportunity, niche.slug, commitment=commitment)
+        llm = self.researcher.llm
+        self.ledger.record_prediction(
+            opportunity, niche.slug, commitment=commitment,
+            llm_provider=getattr(llm, "provider", ""),
+            llm_model=getattr(llm, "model", ""))
         self.ledger.record_attention("adopt", niche.slug)
 
         budget = budget_for(commitment)

@@ -848,3 +848,83 @@ GPT が再開条件を1つ追加した。妥当なので実装した。
 ## 凍結確定
 
 **設計凍結。テスト 140+ 件通過。次はデータを作るフェーズ。**
+
+---
+
+# 第7ラウンド（運用開始後） — LLM を Gemini 無料枠に差し替えた
+
+**設計の変更ではない。** LLM プロバイダは `FROZEN_UNTIL_CALIBRATION` に含まれない
+（配点 / mapping / scale_gate / speculative閾値 / opportunity計算式 /
+monetization重み / percentile化 / 回帰 / 機械学習 のいずれでもない）ので、
+凍結は崩していない。
+
+## 差し替えた理由：ランニングコスト
+
+運用開始時に前提が2つ崩れた。
+
+| | 想定 | 実際 |
+|---|---|---|
+| X API | 無料枠で読める | **無料枠は新規提供停止。** 従量課金で月$30前後 |
+| Claude API | 月500〜2,000円 | **既定の opus-5 + web_search で月$30〜60** |
+
+合計 月$60〜90。**売上0円の段階で出す額ではない。**
+オーナーの判断は「課金しない」だったので、**無料枠があるのは Gemini だけ**という
+理由で Gemini に差し替えた。
+
+OpenAI（gpt-5-mini で月$4程度）も検討したが、課金しない方針のため見送り。
+
+## 実装
+
+```
+src/llm/gemini.py          Gemini アダプタ（新規）
+src/llm/claude.py          そのまま残す（初売上後に戻せるように）
+config.yaml  llm.provider  'gemini' | 'claude'
+```
+
+呼び出し側は変更なし。LLM のインターフェースを
+`available` / `generate_json` / `research` の3つに閉じておいたので、
+アダプタ1ファイルの追加で済んだ。
+
+### Gemini 固有の対応
+
+| 問題 | 対応 |
+|---|---|
+| `responseSchema` が JSON Schema の全キーワードを受け付けない（`additionalProperties` / `minimum` / `maximum` は非対応で 400 になる） | `_sanitize_schema` で再帰的に削る。**元のスキーマは壊さない**（Claude 側でも使うため） |
+| Google 検索グラウンディングと `responseSchema` の併用が保証されていない | 既存設計どおり「検索して読む」と「構造化する」を2回に分ける。Claude 側と同じ呼び出し形になった |
+| 無料枠のレート制限 | 429 を検出したら「`research_limit` を下げてください」と警告して None を返す。パイプラインは止まらない |
+| 安全性ブロック | `promptFeedback.blockReason` を検出してログに出し、空文字を返す |
+
+### 副作用: SERP 代理指標が実 Google に近づいた
+
+`research()` の参照 URL は SERP 代理指標（`src/scout/serp.py`）の入力になる。
+Claude の web_search から **Google 検索グラウンディング** に変わったので、
+分類対象が Google のインデックスに一段近づいた。
+
+第2ラウンドで「Gemini は入れない」と決めたが、あのときの論点は
+「2つ目のLLMの意見は要らない、必要なのは実測データ」だった。今回は
+**コストが理由で、しかも実測データの質が上がる**ので、結論が変わっている。
+判断を覆したのではなく、前提が変わった。
+
+`confidence` は 0.45 に固定したまま据え置く。グラウンディングでも
+「Google の実際の順位」ではないので、実測を騙らせない方針は維持する。
+
+### プロバイダを台帳に記録するようにした
+
+プロバイダを変えると `inferred` スコアの分布が変わるので、校正時に
+Claude 期と Gemini 期の予測を同じデータとして扱えない。
+`mapping_version` と同じ発想で、予測行に `llm_provider` / `llm_model` を記録した。
+`calibrate` の出力にも `llm` 列が出る。
+
+## 併せて直した実装バグ
+
+`daily-generate` が schedule 実行で 401 全滅していた（2026-08-22）。
+`OPERATIONS.md` §2 の「実装バグ」に該当するため、20件を待たずに修正。
+
+原因: `--sample` を argparse の `store_true` で定義していたため、未指定時に
+`None` ではなく `False` が渡り、「トークンが無ければサンプルに落とす」自動判定
+（`use_sample is None` の分岐）が働かず、空の `X_BEARER_TOKEN` で X API を叩いていた。
+
+探索側が通っていたのは `XApiSource.available` がトークンの有無で発掘元ごと
+スキップしていたため。**制作側の収集にだけ同等のガードが無かった**という非対称が原因。
+
+修正後は `daily-generate` が success。回帰テスト2件を追加した。

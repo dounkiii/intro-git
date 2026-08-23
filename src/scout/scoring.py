@@ -118,7 +118,7 @@ class Scorer:
         data = self._score_via_llm(candidate, research, times_seen)
         if data is None:
             score = Score(scored=False,
-                          rationale="未採点（ANTHROPIC_API_KEY 未設定または生成失敗）")
+                          rationale="未採点（LLM の API キー未設定、または生成失敗）")
             action = "手動で確認する（採点されていません）"
         else:
             score = Score(
