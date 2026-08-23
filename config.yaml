@@ -109,7 +109,9 @@ llm:
   # 初売上が出たら claude に戻す想定（アダプタは残してある）。
   # プロバイダは凍結対象ではない（docs/OPERATIONS.md §3 に含まれない）。
   provider: 'gemini'      # gemini | claude
-  gemini_model: 'gemini-2.5-flash'   # 無料枠のあるモデル
+  # モデル名は入れ替わる。404 が出たら API のエラーメッセージが後継を教えてくれるので、
+  # そこに書かれた名前をここに入れる（2026-08-23: 2.5-flash が新規利用不可になった）。
+  gemini_model: 'gemini-3.6-flash'
   model: 'claude-sonnet-5'           # provider: claude のときに使う
   effort: 'medium'        # low | medium | high | xhigh | max
   max_tokens: 8000

@@ -41,6 +41,17 @@ def test_未知のプロバイダは明示的に失敗する():
         config.llm_client()
 
 
+def test_モデル名は設定から読む():
+    """モデル名は入れ替わる。404 が出たら API のメッセージが後継を教えてくれる。
+
+    2026-08-23: gemini-2.5-flash が新規利用不可になり 404 で全滅した。
+    """
+    config = Config.load()
+    config.raw.setdefault("llm", {})["gemini_model"] = "gemini-9.9-flash"
+
+    assert config.llm_client().model == "gemini-9.9-flash"
+
+
 def test_キーがなければavailableがFalseになる():
     """呼び出し側はこれを見てテンプレ生成に落ちる。パイプラインは止まらない。"""
     assert GeminiClient(api_key="").available is False

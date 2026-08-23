@@ -74,12 +74,15 @@ class AffiliateEngine:
             return ""
         return os.getenv(slot, "").strip()
 
-    def build(self, category: str) -> MonetizationBlock:
+    def build(self, category: str, quiet: bool = False) -> MonetizationBlock:
         """カテゴリに対応する収益化ブロックを組む。
 
         探索レイヤで採用した新しいニッチは専用の案件定義を持たないため、
         `offers.default` にフォールバックする。これが無いと採用したネタが
         すべて「換金経路なし」になり、1本も作られなくなる。
+
+        `quiet=True` は経路の有無を調べるだけの呼び出し用。スコアリングは候補の
+        キーワードごとに問い合わせるので、そのたびに警告を出すとログが埋まる。
         """
         entries = self.offers_by_category.get(category)
         if not entries:
@@ -106,7 +109,7 @@ class AffiliateEngine:
             disclosure=self.disclosure,
             liability_note=self.liability_note,
         )
-        if not block.has_route:
+        if not block.has_route and not quiet:
             logger.warning(
                 "category=%s に換金経路がありません。AFF_* の環境変数を設定してください。", category
             )

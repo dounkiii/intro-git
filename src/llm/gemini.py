@@ -51,7 +51,7 @@ class GeminiClient:
 
     provider = "gemini"
 
-    def __init__(self, api_key: str, model: str = "gemini-2.5-flash",
+    def __init__(self, api_key: str, model: str = "gemini-3.6-flash",
                  effort: str = "medium", max_tokens: int = 8000,
                  timeout: int = 120):
         self.api_key = api_key
@@ -81,7 +81,11 @@ class GeminiClient:
                 detail = exc.response.json().get("error", {}).get("message", "")[:300]
             except Exception:
                 pass
-            if status == 429:
+            if status == 404 and "no longer available" in detail:
+                logger.warning("モデル名が古くなっています。config.yaml の "
+                               "llm.gemini_model を上のメッセージが示す名前に変更して"
+                               "ください。")
+            elif status == 429:
                 logger.warning("Gemini の無料枠のレート上限に当たりました。"
                                "config.yaml の scout.research_limit を下げてください。")
             else:

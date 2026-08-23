@@ -236,7 +236,8 @@ class Scorer:
 
             self._affiliate = AffiliateEngine(self.config)
 
-        return any(self._affiliate.build(key).has_route
+        # quiet=True: 経路の有無を調べるだけなので、キーワードごとに警告を出さない
+        return any(self._affiliate.build(key, quiet=True).has_route
                    for key in [*candidate.keywords, "default"])
 
     def _has_inferred_potential(self, research: Research) -> bool:

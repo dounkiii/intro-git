@@ -81,3 +81,20 @@ def test_動画説明文はリンクを1本に絞る(monkeypatch):
     # 動画の説明欄はリンクが機能しにくいので集約ページのみを載せる
     assert "https://example.com/links" in footer
     assert "https://example.com/soft" not in footer
+
+
+def test_quietなら経路なしの警告を出さない(monkeypatch, caplog):
+    """スコアリングはキーワードごとに問い合わせるので、毎回警告を出すとログが埋まる。"""
+    import logging
+
+    for slot in ("AFF_ACCOUNTING_SOFT", "AFF_TAX_ADVISOR", "AFF_HUB_URL", "AFF_PRODUCT_URL"):
+        monkeypatch.delenv(slot, raising=False)
+    engine = AffiliateEngine(_config())
+
+    with caplog.at_level(logging.WARNING, logger="src.monetize.affiliate"):
+        engine.build("tax", quiet=True)
+    assert caplog.records == []
+
+    with caplog.at_level(logging.WARNING, logger="src.monetize.affiliate"):
+        engine.build("tax")
+    assert caplog.records
