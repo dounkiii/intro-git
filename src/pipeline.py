@@ -447,13 +447,18 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_scout = sub.add_parser("scout", help="発掘〜裏取り〜採点〜日次レポート")
-    p_scout.add_argument("--sample", action="store_true", help="サンプル候補で実行")
+    p_scout.add_argument("--sample", action="store_true", default=None,
+                         help="サンプル候補で実行（未指定なら発掘元の有無で自動判定）")
     p_scout.add_argument("--open-issue", action="store_true", help="レポート Issue を作成する")
     p_scout.set_defaults(func=_cmd_scout)
 
     p_run = sub.add_parser("run", help="収集〜台本/記事/動画生成〜承認キュー投入")
     p_run.add_argument("--limit", type=int, default=None)
-    p_run.add_argument("--sample", action="store_true", help="サンプルデータで実行")
+    # default=None が要点。store_true の既定 False を渡すと「トークンが無ければ
+    # サンプルに落とす」自動判定（collectors/twitter.py）が働かず、空トークンで
+    # X API を叩いて 401 で落ちる。
+    p_run.add_argument("--sample", action="store_true", default=None,
+                       help="サンプルデータで実行（未指定ならトークン有無で自動判定）")
     p_run.add_argument("--open-issue", action="store_true", help="承認 Issue を作成する")
     p_run.set_defaults(func=_cmd_run)
 

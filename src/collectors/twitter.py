@@ -39,6 +39,12 @@ class TwitterCollector:
 
         if use_sample is None:
             use_sample = not self.token
+        elif not use_sample and not self.token:
+            # 明示的に本番指定されてもトークンが無ければ呼べない。ここで落とすと
+            # 毎朝の cron が止まるので、警告してサンプルに落とす。
+            logger.warning("X_BEARER_TOKEN が未設定です。サンプルデータで続行します"
+                           "（X API は呼びません）。")
+            use_sample = True
 
         results: dict[str, list[Tweet]] = {}
         for category, query in queries.items():

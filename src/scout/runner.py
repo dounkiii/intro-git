@@ -50,7 +50,7 @@ class ScoutPipeline:
         self.ledger = ExperimentLedger(funnel_thresholds=scout.get("funnel"))
 
     # ------------------------------------------------------------------
-    def discover(self, use_sample: bool = False) -> list[Candidate]:
+    def discover(self, use_sample: bool | None = None) -> list[Candidate]:
         if use_sample:
             return self._sample()
 
@@ -67,7 +67,7 @@ class ScoutPipeline:
             candidates.extend(found)
         return candidates
 
-    def run(self, use_sample: bool = False, open_issue: bool = False
+    def run(self, use_sample: bool | None = None, open_issue: bool = False
             ) -> tuple[list[Opportunity], str]:
         """1日分の探索を実行し、(順位付け済みの機会, レポート本文) を返す。"""
         candidates = self.discover(use_sample=use_sample)
