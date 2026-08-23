@@ -22,7 +22,7 @@ import logging
 import re
 from pathlib import Path
 
-from .config import ARTICLE_DIR, Config, OUTPUT_DIR
+from .config import ARTICLE_DIR, ROOT, Config, OUTPUT_DIR
 from .collectors.twitter import TwitterCollector
 from .models import Article, VideoScript
 from .monetize.revenue import RevenueLog
@@ -285,6 +285,8 @@ class Pipeline:
         動画（重い）は投稿時に台本から再生成する。
         """
         path = Path(video_path) if video_path else OUTPUT_DIR / f"{item_id}.mp4"
+        if not path.is_absolute():
+            path = ROOT / path        # 保存はリポジトリ相対（review_queue._relative）
         if path.exists():
             return path
         logger.info("動画が見つかりません（%s）。台本から再生成します。", path)

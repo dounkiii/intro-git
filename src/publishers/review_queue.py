@@ -11,10 +11,24 @@ import logging
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
 
-from ..config import REVIEW_DIR
+from ..config import REVIEW_DIR, ROOT
 from ..models import Article, VideoScript
 
 logger = logging.getLogger(__name__)
+
+
+def _relative(path: Path) -> str:
+    """リポジトリ相対のパスにする。
+
+    絶対パスを保存すると、GitHub Actions のランナー（/home/runner/...）と
+    ローカル（/home/user/...）で値が変わり、実行するたびにコミット済みの状態
+    ファイルが汚れて競合の種になる。動画本体はコミットせず投稿時に台本から
+    再生成する設計なので、絶対パスを持つ必要もない。
+    """
+    try:
+        return str(Path(path).resolve().relative_to(ROOT))
+    except ValueError:
+        return str(path)
 
 
 @dataclass
@@ -50,7 +64,7 @@ class ReviewQueue:
             id=item_id,
             status="pending",
             script=script.to_dict(),
-            video_path=str(video_path),
+            video_path=_relative(video_path),
             safety_flags=safety_flags,
             category=category or script.topic_category,
             article=article.to_dict() if article else {},

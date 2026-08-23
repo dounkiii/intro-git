@@ -25,7 +25,7 @@
     "hook": "年金・社会保険の話。知らないと損するかもしれない話です。",
     "generated_by": "template"
   },
-  "video_path": "/home/runner/work/intro-git/intro-git/data/output/social_insurance-sample-i1.mp4",
+  "video_path": "data/output/social_insurance-sample-i1.storyboard.json",
   "safety_flags": [],
   "category": "social_insurance",
   "article": {

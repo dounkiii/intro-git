@@ -25,7 +25,7 @@
     "hook": "家計とお金の話。知らないと損するかもしれない話です。",
     "generated_by": "template"
   },
-  "video_path": "/home/runner/work/intro-git/intro-git/data/output/household-sample-h1.mp4",
+  "video_path": "data/output/household-sample-h1.storyboard.json",
   "safety_flags": [],
   "category": "household",
   "article": {

@@ -105,3 +105,30 @@ def test_換金経路なしは承認Issueで警告される(tmp_path):
     body = render_approval_issue([(item, {"monetization_route": "なし"})])
 
     assert "AFF_* Secrets を確認" in body
+
+
+def test_動画パスはリポジトリ相対で保存される(tmp_path):
+    """絶対パスを保存すると、Actions のランナーとローカルで値が変わり、
+    実行するたびにコミット済みの状態ファイルが汚れて競合の種になる。"""
+    from src.config import ROOT
+
+    queue = ReviewQueue(tmp_path)
+    script = VideoScript(topic_category="tax", title="t", slides=["a"], narration=["a"])
+
+    item = queue.enqueue("tax-1", script,
+                         video_path=ROOT / "data" / "output" / "tax-1.mp4",
+                         safety_flags=[], category="tax")
+
+    assert item.video_path == "data/output/tax-1.mp4"
+    assert not item.video_path.startswith("/")
+
+
+def test_リポジトリ外の絶対パスはそのまま保存される(tmp_path):
+    """一時ディレクトリなどリポジトリ外を指す場合は相対化できないので触らない。"""
+    queue = ReviewQueue(tmp_path)
+    script = VideoScript(topic_category="tax", title="t", slides=["a"], narration=["a"])
+
+    item = queue.enqueue("tax-2", script, video_path=tmp_path / "x.mp4",
+                         safety_flags=[], category="tax")
+
+    assert item.video_path.endswith("x.mp4")

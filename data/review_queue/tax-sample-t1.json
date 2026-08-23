@@ -25,7 +25,7 @@
     "hook": "税金ニュース解説。知らないと損するかもしれない話です。",
     "generated_by": "template"
   },
-  "video_path": "/home/runner/work/intro-git/intro-git/data/output/tax-sample-t1.mp4",
+  "video_path": "data/output/tax-sample-t1.storyboard.json",
   "safety_flags": [],
   "category": "tax",
   "article": {
