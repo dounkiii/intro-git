@@ -49,6 +49,16 @@ jobs:
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          # 探索レイヤは AFF_* から換金経路を実測する（Scorer._has_affiliate_route）。
+          # 渡し忘れると monetization_observed が常に False になり、
+          # すべての候補が「案件未設定」判定になって business スコアが上がらない。
+          AFF_HUB_URL: ${{ secrets.AFF_HUB_URL }}
+          AFF_PRODUCT_URL: ${{ secrets.AFF_PRODUCT_URL }}
+          AFF_ACCOUNTING_SOFT: ${{ secrets.AFF_ACCOUNTING_SOFT }}
+          AFF_TAX_ADVISOR: ${{ secrets.AFF_TAX_ADVISOR }}
+          AFF_FURUSATO: ${{ secrets.AFF_FURUSATO }}
+          AFF_SECURITIES: ${{ secrets.AFF_SECURITIES }}
+          AFF_INSURANCE: ${{ secrets.AFF_INSURANCE }}
         run: |
           SAMPLE_FLAG=""
           if [ "${{ inputs.sample }}" = "true" ]; then SAMPLE_FLAG="--sample"; fi

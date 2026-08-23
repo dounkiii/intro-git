@@ -252,3 +252,30 @@ def test_呼び出し間隔を空ける(monkeypatch):
 
     client.generate_json("s", "p", {"type": "object"})   # 2回目は間隔を空ける
     assert slept and slept[0] > 0
+
+
+# --- ワークフローの環境変数の取り違え防止 -------------------------------------
+def test_探索と制作の両方にAFF環境変数が渡っている():
+    """探索レイヤも AFF_* から換金経路を実測する（Scorer._has_affiliate_route）。
+
+    2026-08-23: daily-scout.yml に AFF_* を渡し忘れていたため、シークレットを
+    登録しても monetization_observed が常に False になり、すべての候補が
+    「案件未設定」判定になっていた。
+    """
+    import pathlib
+    import re
+
+    import yaml
+
+    config = yaml.safe_load(pathlib.Path("config.yaml").read_text(encoding="utf-8"))
+    monetization = config["monetization"]
+    needed = {monetization["hub_url_slot"], monetization["product_url_slot"]}
+    for offers in monetization["offers"].values():
+        needed.update(o["slot"] for o in offers)
+
+    for workflow in ("daily-scout.yml", "daily-generate.yml", "approve-command.yml"):
+        text = pathlib.Path(".github/workflows") / workflow
+        content = text.read_text(encoding="utf-8")
+        passed = set(re.findall(r"(AFF_[A-Z_]+):", content))
+        missing = needed - passed
+        assert not missing, f"{workflow} に渡っていない: {sorted(missing)}"

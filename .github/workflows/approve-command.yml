@@ -54,9 +54,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          # /adopt は探索結果を読むので ANTHROPIC_API_KEY は不要だが、
-          # 同じジョブで publish まで走るため収益化リンクを通しておく
+          # /adopt と /test は換金経路を実測するので AFF_* が必要。
+          # 同じジョブで publish まで走るため全スロットを通す。
           AFF_HUB_URL: ${{ secrets.AFF_HUB_URL }}
+          AFF_PRODUCT_URL: ${{ secrets.AFF_PRODUCT_URL }}
+          AFF_ACCOUNTING_SOFT: ${{ secrets.AFF_ACCOUNTING_SOFT }}
+          AFF_TAX_ADVISOR: ${{ secrets.AFF_TAX_ADVISOR }}
+          AFF_FURUSATO: ${{ secrets.AFF_FURUSATO }}
+          AFF_SECURITIES: ${{ secrets.AFF_SECURITIES }}
+          AFF_INSURANCE: ${{ secrets.AFF_INSURANCE }}
         run: |
           python -m src.pipeline command \
             --body-file /tmp/comment.txt \
