@@ -44,3 +44,17 @@ def test_投稿はあるが収益ゼロだと見直しを促す(tmp_path):
 
     assert "収益ゼロ" in report
     assert "CTA" in report
+
+
+def test_採用0件なら承認が止まっているとは書かない(tmp_path):
+    """止まったのではなく、まだ始まっていない。区別しないと誤診断になる。"""
+    report = RevenueLog(tmp_path).render_report(adopted=0)
+
+    assert "まだ採用したニッチがない" in report
+    assert "承認が止まっている" not in report
+
+
+def test_採用済みで投稿ゼロなら承認の停止を疑う(tmp_path):
+    report = RevenueLog(tmp_path).render_report(adopted=3)
+
+    assert "承認が止まっている" in report

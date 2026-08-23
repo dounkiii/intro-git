@@ -431,11 +431,18 @@ def _cmd_calibrate(args) -> None:
 def _cmd_report(args) -> None:
     from .scout.ledger import ExperimentLedger
 
-    report = RevenueLog().render_report(days=args.days)
-    report = f"{report}\n\n{ExperimentLedger().render_report()}"
+    ledger = ExperimentLedger()
+    _, adopted = ledger.publish_rate()
+    report = RevenueLog().render_report(days=args.days, adopted=adopted)
+    report = f"{report}\n\n{ledger.render_report()}"
     print(report)
     if args.issue_title:
-        GitHubIssueSurface(Config.load()).create_issue(args.issue_title, report)
+        config = Config.load()
+        surface = GitHubIssueSurface(config)
+        # 承認ワークフローは approval-queue ラベルで起動する。週次レポートに
+        # 同じラベルを付けると、レポートへのコメントで承認処理が誤発火する。
+        surface.label = config.section("approval").get("report_label", "weekly-report")
+        surface.create_issue(args.issue_title, report)
 
 
 def _cmd_revenue(args) -> None:

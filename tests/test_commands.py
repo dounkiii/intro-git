@@ -132,3 +132,24 @@ def test_リポジトリ外の絶対パスはそのまま保存される(tmp_pat
                          safety_flags=[], category="tax")
 
     assert item.video_path.endswith("x.mp4")
+
+
+def test_週次レポートは承認キューとは別のラベルを使う():
+    """承認ワークフローは approval-queue ラベルで起動する。週次レポートに同じ
+    ラベルを付けると、レポートへのコメントで承認処理が誤発火する。"""
+    from src.config import Config
+
+    approval = Config.load().section("approval")
+
+    assert approval["label"] != approval["report_label"]
+
+
+def test_承認ワークフローがレポートのラベルで起動しない():
+    import pathlib
+
+    workflow = pathlib.Path(".github/workflows/approve-command.yml").read_text(encoding="utf-8")
+    from src.config import Config
+
+    report_label = Config.load().section("approval")["report_label"]
+
+    assert f"'{report_label}'" not in workflow

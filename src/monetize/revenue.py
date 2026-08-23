@@ -102,8 +102,12 @@ class RevenueLog:
                              revenue_jpy=revenue, by_category=by_category,
                              routeless=routeless)
 
-    def render_report(self, days: int = 7) -> str:
-        """週次レポート（Markdown）。Issue にそのまま貼る。"""
+    def render_report(self, days: int = 7, adopted: int | None = None) -> str:
+        """週次レポート（Markdown）。Issue にそのまま貼る。
+
+        `adopted` は採用済みニッチ数。0 件のときに「承認が止まっている」と
+        書くと誤診断になる（止まったのではなく、まだ始まっていない）ため区別する。
+        """
         s = self.summarize(days)
         lines = [
             f"# 週次レポート（直近{days}日）",
@@ -119,7 +123,10 @@ class RevenueLog:
             lines.append(f"- ⚠️ 換金経路なしの案件: {s.routeless}件（`AFF_*` Secrets を確認）")
 
         lines.extend(["", "## 判断", ""])
-        if s.posted == 0:
+        if s.posted == 0 and adopted == 0:
+            lines.append("- まだ採用したニッチがない。リサーチ結果 Issue で "
+                         "`/test <id>` を1つ押すところから始める。")
+        elif s.posted == 0:
             lines.append("- 投稿ゼロ。承認が止まっている。通勤中の承認を再開するか cron を確認する。")
         elif s.revenue_jpy == 0 and s.posted >= 10:
             lines.append("- 投稿は出ているが収益ゼロ。CTA の位置とニッチ選定を見直す"

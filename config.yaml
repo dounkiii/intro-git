@@ -196,6 +196,8 @@ publishing:
 approval:
   # 承認 Issue のラベル。ワークフローの起動条件に使う。
   label: 'approval-queue'
+  # 週次レポートのラベル。承認ワークフローを誤発火させないよう別にする。
+  report_label: 'weekly-report'
   # safety_flags 付きの案件を `/approve all` の対象から外す（安全装置）
   exclude_flagged_from_bulk: true
   # 1 通の Issue に載せる最大件数（通勤中に読める量に抑える）
