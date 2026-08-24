@@ -17,6 +17,7 @@
 | 3 | `docs/PLAYBOOK.md` | 収益戦略・プラットフォーム条件の実数・法務上の地雷 |
 | 4 | `docs/PHONE_OPS.md` | セットアップとオーナーの日次手順 |
 | 5 | `data/scout/ledger.jsonl` | 予測・実績・レビュー履歴。数字は全部ここ |
+| 6 | `docs/REVIEW_REQUEST.md` | ChatGPT へのレビュー依頼窓口。**常に最新の依頼だけを置く** |
 
 ---
 
@@ -101,8 +102,16 @@ Secrets が必要なときは **値ではなく Secret 名だけ**を指示す�
 | **オーナー（人間）** | Secrets 登録、アカウント作成と ASP 審査、`/test` `/approve`、実績入力（週1回30秒） |
 | **ChatGPT** | 設計レビュー、診断のセカンドオピニオン、改善案の妥当性確認 |
 
-やり取りは「Claude Code の結果 → ChatGPT レビュー → Claude Code 向け返信文 → 実装」
-のループで回ります。**返信は一括コピペできる形で作ること。**
+やり取りは「Claude Code の結果 → ChatGPT レビュー → 実装」のループで回ります。
+
+**依頼は `docs/REVIEW_REQUEST.md` を上書きして渡す。** オーナーが送るのは
+このファイルの URL 1行だけで固定になる（リポジトリは public）。長文を毎回
+コピペさせない。ファイルは初見でも読めるように前提から書く。
+
+  https://github.com/dounkiii/intro-git/blob/claude/mobile-automation-side-income-59tccj/docs/REVIEW_REQUEST.md
+
+ChatGPT からの回答は、共有リンクを受け取って読む。オーナーに長文を
+コピペさせない。リンクが取れない場合のみ本文を貼ってもらう。
 
 ---
 
