@@ -17,7 +17,10 @@ from dataclasses import asdict, dataclass, field
 
 # observed → 点数の換算ルールの版。ルールを変えたら必ず上げる。
 # これが無いと「スコアが変わったのはルール変更のせいか実力のせいか」が判別できない。
-MAPPING_VERSION = "2026-08-19.1"
+# 2026-08-24.1: observed の入力定義を変更した。ハブ（AFF_HUB_URL）を
+# 「案件が実在する」に数えるのをやめたため、monetization_observed の分布が
+# 変わる。旧版の予測と同じデータとして校正しないためバージョンを上げる。
+MAPPING_VERSION = "2026-08-24.1"
 
 # 推測しか無い軸に与える信頼度。observed が入ると上がる。
 INFERRED_CONFIDENCE = 0.3

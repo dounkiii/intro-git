@@ -230,15 +230,24 @@ class Scorer:
         """**実測**: 自前の AFF_* に案件が実在するか。
 
         `observed` 側。ここだけが「実際に案件が存在した」という事実。
+
+        **ハブ（`AFF_HUB_URL`）は数えない。** `MonetizationBlock.has_route` は
+        ハブと自前商品も含めて「CTA を出せるか」を見るが、それを observed に
+        入れると note の URL を登録しただけで全候補が
+        `MONETIZATION_IMMEDIATE`（重み 1.0）になる。ハブはリンク集約ページで
+        あって成果報酬の出る案件ではないため、「案件が実在した」という事実に
+        はならない。相乗平均で「金になるか」を効かせる設計が無効になる。
+
+        提携が通っていない期間は observed=False / inferred=True となり、
+        readiness は POTENTIAL（0.6）に落ちる。それが今の正しい状態。
+        診断側（`funnel.py` の `direct_route`）と同じ定義を使う。
         """
         if self._affiliate is None:
             from ..monetize.affiliate import AffiliateEngine
 
             self._affiliate = AffiliateEngine(self.config)
 
-        # quiet=True: 経路の有無を調べるだけなので、キーワードごとに警告を出さない
-        return any(self._affiliate.build(key, quiet=True).has_route
-                   for key in [*candidate.keywords, "default"])
+        return self._affiliate.has_direct_offer()
 
     def _has_inferred_potential(self, research: Research) -> bool:
         """**推論**: 案件が無くても収益化の道があると LLM が言っているか。
