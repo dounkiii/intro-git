@@ -74,6 +74,20 @@ class AffiliateEngine:
             return ""
         return os.getenv(slot, "").strip()
 
+    def has_direct_offer(self) -> bool:
+        """直接の換金経路（AFF_* の案件）が1つでも実在するか。
+
+        hub_url / product_url は含めない。ハブは「案件が通るまで収益への道を
+        閉じないための fallback」であって、案件そのものではないため。
+
+        提携審査が通っていない期間は、クリックが出ていても成約は起こり得ない。
+        この事実を診断側（funnel.py）に渡さないと、Stage 4 を「案件が悪い」と
+        読んで存在しない案件を変えろと言うことになる。
+        """
+        return any(self._resolve(entry.get("slot", ""))
+                   for entries in self.offers_by_category.values()
+                   for entry in entries or [])
+
     def build(self, category: str, quiet: bool = False) -> MonetizationBlock:
         """カテゴリに対応する収益化ブロックを組む。
 
@@ -116,8 +130,24 @@ class AffiliateEngine:
         return block
 
     # ------------------------------------------------------------------
+    def disclosure_header(self, block: MonetizationBlock) -> str:
+        """投稿説明文の**冒頭**に置く広告表示。
+
+        景表法のステマ規制で求められるのは「一般消費者が広告だと明瞭に分かる」
+        ことで、どこかに書いてあれば足りるわけではない。長い説明文の末尾に置くと、
+        リンクや免責の後ろに埋もれて読まれない。先頭に出す。
+        """
+        if not block.disclosure:
+            return ""
+        if not (block.hub_url or block.product_url or block.offers):
+            return ""
+        return block.disclosure
+
     def video_description_footer(self, block: MonetizationBlock) -> str:
-        """動画説明文の末尾。動画の説明欄はリンクが機能しにくいので集約先へ1本に絞る。"""
+        """動画説明文の末尾。動画の説明欄はリンクが機能しにくいので集約先へ1本に絞る。
+
+        広告表示は `disclosure_header` で冒頭に出すため、ここには入れない。
+        """
         lines: list[str] = []
         if block.hub_url:
             lines.append(f"▼詳しい解説と関連リンク\n{block.hub_url}")
@@ -125,8 +155,6 @@ class AffiliateEngine:
             lines.append(f"▼詳しい解説\n{block.product_url}")
         if block.liability_note:
             lines.append(block.liability_note)
-        if block.disclosure and (block.hub_url or block.product_url or block.offers):
-            lines.append(block.disclosure)
         return "\n".join(lines)
 
     def article_cta_section(self, block: MonetizationBlock) -> str:

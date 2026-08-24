@@ -73,6 +73,9 @@ MIN_REVENUE_EVENTS_FOR_SCALE = 2
 # 診断中を示す原因ラベル（funnel.py の CAUSE_* と対応）
 DIAGNOSING_CAUSES = ("creative", "funnel", "offer")
 
+# 直接の換金経路が無い期間。診断中には入れない（原因はニッチ側に無い）
+CAUSE_NOT_MONETIZED = "not_monetized"
+
 # CHEAP_TEST の上限を小さくしているのが要点。外れても損失が小さいので、
 # 確信が持てない候補を「様子見」で放置せず、実データを取りに行ける。
 BUDGETS = {
@@ -172,6 +175,14 @@ def next_level(current: str, stage: int, decided: bool, revenue_jpy: int,
             return CHEAP_TEST, (f"配信されていないが試したクリエイティブが "
                                 f"{creatives_tried}種類。切り口を変えてもう一度試す"), ""
         return EXIT, (f"{creatives_tried}種類のクリエイティブで配信されなかったため撤退"), ""
+
+    # 直接の換金経路が未提携なら、成約しないのは案件のせいではない。
+    # 診断中にして生成枠を絞ると、配信もクリックも成立している唯一のニッチを
+    # オーナー側の作業待ちで減速させることになる。レベルは動かさない。
+    if likely_cause == CAUSE_NOT_MONETIZED:
+        return current, (f"配信もクリックは成立している（Stage {stage}）が、"
+                         f"直接の換金経路が未提携。案件の良し悪しは判定不能なので "
+                         f"レベルは動かさない（提携が通ってから評価する）"), ""
 
     # Stage 2〜4: 配信は成立しているのでニッチ撤退はしない。
     # ただし原因が解消されていないので生成枠は増やさない（診断中）。

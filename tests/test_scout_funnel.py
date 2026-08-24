@@ -198,3 +198,59 @@ def test_閾値を上げれば判定が保留される():
     strict = FunnelDiagnoser({"min_posts": 50, "min_impressions": 100000})
 
     assert strict.diagnose(FunnelMetrics("n", posts=10, impressions=300)).decided is False
+
+
+def test_換金経路が未提携ならStage4を案件のせいにしない():
+    """提携審査が通るまではクリックが出ても成約は起こり得ない。
+    「案件を変える」は変える案件が無いので実行できない指示になる。"""
+    from src.scout.funnel import (CAUSE_NOT_MONETIZED, CAUSE_OFFER,
+                                  FunnelDiagnoser, FunnelMetrics)
+
+    m = FunnelMetrics(niche="n", posts=10, impressions=20000, revenue_jpy=0,
+                      engaged=2000, cta_clicks=200, conversions=0,
+                      direct_route=False)
+    verdict = FunnelDiagnoser().diagnose(m, creatives_tried=2)
+
+    assert verdict.stage == 4
+    assert verdict.likely_cause == CAUSE_NOT_MONETIZED
+    assert verdict.likely_cause != CAUSE_OFFER
+    assert "提携" in verdict.prescription
+
+
+def test_換金経路があればStage4は案件の問題と診断する():
+    from src.scout.funnel import CAUSE_OFFER, FunnelDiagnoser, FunnelMetrics
+
+    m = FunnelMetrics(niche="n", posts=10, impressions=20000, revenue_jpy=0,
+                      engaged=2000, cta_clicks=200, conversions=0,
+                      direct_route=True)
+    verdict = FunnelDiagnoser().diagnose(m, creatives_tried=2)
+
+    assert verdict.stage == 4
+    assert verdict.likely_cause == CAUSE_OFFER
+
+
+def test_換金経路が未提携でも生成枠を絞らない():
+    """配信もクリックも成立している唯一のニッチを、オーナー側の
+    提携作業待ちで減速させてはいけない。"""
+    from src.scout.commitment import ADOPT, next_level
+    from src.scout.funnel import CAUSE_NOT_MONETIZED
+
+    level, why, diagnosing = next_level(
+        ADOPT, stage=4, decided=True, revenue_jpy=0, posts=10,
+        creatives_tried=2, likely_cause=CAUSE_NOT_MONETIZED)
+
+    assert level == ADOPT
+    assert diagnosing == ""      # 診断中にしない = 生成枠を絞らない
+    assert "判定不能" in why
+
+
+def test_換金経路が未提携でも撤退はしない():
+    """収益0を「このニッチは売れない」という教師データにしない。"""
+    from src.scout.commitment import ADOPT, EXIT, next_level
+    from src.scout.funnel import CAUSE_NOT_MONETIZED
+
+    level, _, _ = next_level(
+        ADOPT, stage=4, decided=True, revenue_jpy=0, posts=50,
+        creatives_tried=5, likely_cause=CAUSE_NOT_MONETIZED)
+
+    assert level != EXIT

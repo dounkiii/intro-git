@@ -13,6 +13,7 @@ import logging
 from pathlib import Path
 
 from ..config import Config
+from ..monetize.affiliate import AffiliateEngine
 from .commitment import (ADOPT, CHEAP_TEST, EXIT, LABELS, OBSERVE, budget_for,
                          initial_level, next_level)
 from .explore import allocate, pick_speculative
@@ -230,6 +231,9 @@ class ScoutPipeline:
             conversions=values.get("conversions", values.get("cv")),
             attention_minutes=self.ledger.attention_minutes(niche_slug),
             api_cost_jpy=values.get("cost", 0),
+            # 提携審査が通るまではクリックが出ても成約は起こり得ない。
+            # 実測（AFF_* の実在）を渡し、収益0を「案件が悪い」と読ませない。
+            direct_route=AffiliateEngine(self.config).has_direct_offer(),
         )
         niche = next((n for n in self.niches.load() if n.slug == niche_slug), None)
         creatives = max(1, niche.creatives_tried if niche else 1)

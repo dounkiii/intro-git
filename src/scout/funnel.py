@@ -56,6 +56,8 @@ CAUSE_CREATIVE = "creative"       # 切り口・クリエイティブが原因�
 CAUSE_NICHE = "niche"             # ニッチ自体が原因の可能性が高い
 CAUSE_FUNNEL = "funnel"           # 導線・CTA
 CAUSE_OFFER = "offer"             # 商品・案件
+# 直接の換金経路がまだ無い。案件の良し悪しは判定不能（Stage 0 と同じ思想）
+CAUSE_NOT_MONETIZED = "not_monetized"
 
 # 同ニッチで最低これだけ切り口を変えないと、ニッチ原因とは言わない
 MIN_CREATIVES_FOR_NICHE_CAUSE = 2
@@ -101,6 +103,10 @@ class FunnelMetrics:
     posts: int = 0
     impressions: int | None = None     # None = 未入力（0 と区別する）
     revenue_jpy: int = 0
+    # 直接の換金経路（AFF_* の案件）が実在するか。None = 未記録。
+    # False の期間はクリックが出ても成約は起こり得ないので、収益0を
+    # 「案件が悪い」とも「このニッチは売れない」とも読まない。
+    direct_route: bool | None = None
 
     # --- Diagnostic（任意） ---
     engaged: int | None = None
@@ -265,6 +271,10 @@ class FunnelDiagnoser:
             prescription = ("切り口を変えてもう一度試す" if cause == CAUSE_CREATIVE
                             else "ニッチ側が原因の可能性が高い。撤退を検討する"
                             if cause == CAUSE_NICHE else prescription)
+        elif cause == CAUSE_NOT_MONETIZED:
+            # 既定の「案件を変える」は、変える案件が無いので実行できない
+            prescription = ("直接の換金経路が未提携。案件を変えるのではなく "
+                            "提携申請を通す（オーナー側の作業）")
 
         basis_note = ("自アカウントの実績中央値" if basis == "own_baseline"
                       else f"{self.platform} の既定値")
@@ -287,6 +297,10 @@ class FunnelDiagnoser:
         if stage == 3:
             return CAUSE_FUNNEL, "反応はあるがクリックされていない"
         if stage == 4:
+            if m.direct_route is False:
+                return CAUSE_NOT_MONETIZED, (
+                    "クリックは出ているが直接の換金経路が未提携。"
+                    "案件の良し悪しはまだ判定できない")
             return CAUSE_OFFER, "クリックはあるが成約していない"
 
         # Stage 1: ここが断定してはいけない箇所

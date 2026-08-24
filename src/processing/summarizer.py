@@ -236,8 +236,12 @@ class Summarizer:
 
     def _compose_description(self, base: str, topic: Topic,
                              block: MonetizationBlock) -> str:
-        """投稿説明文 = 本文 + 安全性の注記 + 収益化フッタ + ハッシュタグ。"""
-        parts = [base.strip()]
+        """投稿説明文 = 広告表示 + 本文 + 安全性の注記 + 収益化フッタ + ハッシュタグ。
+
+        広告表示を先頭に置くのは景表法のステマ規制のため。末尾に置くと
+        リンクや免責の後ろに埋もれ、「明瞭に分かる」を満たさない恐れがある。
+        """
+        parts = [self.affiliate.disclosure_header(block), base.strip()]
 
         if "unverified_claim" in topic.safety_flags:
             parts.append("※未確認の情報を含む可能性があります。")
