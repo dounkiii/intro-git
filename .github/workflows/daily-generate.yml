@@ -64,9 +64,34 @@ jobs:
         run: |
           SAMPLE_FLAG=""
           if [ "${{ inputs.sample }}" = "true" ]; then SAMPLE_FLAG="--sample"; fi
-          python -m src.pipeline run \
+          set -o pipefail
+          python -m src.pipeline run \ 2>&1 | tee /tmp/pipeline.log
             --limit "${{ inputs.limit || '5' }}" \
             --open-issue $SAMPLE_FLAG
+
+      # 失敗した回も記録して push する（if: always()）。ジョブが落ちると
+      # 下のコミットステップは動かず、記録がランナーごと消えるため独立させている。
+      # api.github.com が塞がれた環境からは Actions のログが読めないので、
+      # 昨夜の実行を git だけで追えるようにするのが目的。
+      # コミットするのは data/ops/ だけ。失敗時の中途半端な状態は残さない。
+      - name: 実行結果を記録
+        if: always()
+        run: |
+          python -m src.pipeline oplog \
+            --workflow daily-generate \
+            --status '${{ job.status }}' \
+            --log /tmp/pipeline.log \
+            --run-url '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add -A data/ops/
+          if git diff --cached --quiet; then
+            echo "記録に変更なし"
+            exit 0
+          fi
+          git commit -m "chore: daily-generate の実行結果を記録 (${{ job.status }})"
+          git pull --rebase origin "${{ github.ref_name }}"
+          git push
 
       - name: 承認キューの状態をコミット
         run: |

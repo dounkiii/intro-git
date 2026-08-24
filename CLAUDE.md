@@ -146,15 +146,36 @@ ChatGPT に人力で見せたいときだけ、`docs/REVIEW_REQUEST.md` の URL 
 - プロバイダは予測行（`llm_provider` / `llm_model`）に記録される。
   **Claude 期と Gemini 期の予測を同じデータとして校正しないこと**
 
+## 毎朝の自動点検
+
+`data/ops/runs.jsonl` に**ワークフロー自身が実行結果を書いて push する**
+（失敗した回も `if: always()` で記録される）。毎朝 21:40 UTC = 06:40 JST に
+Routine が新しいセッションを起動し、次を見る。
+
+```bash
+python -m src.pipeline opreport      # 要確認の回だけを出す
+```
+
+**この経路にした理由。** `api.github.com` はこの環境のプロキシで止まり
+（"GitHub access is not enabled for this session"）、Routine から起動される
+セッションには GitHub MCP ツールも渡らない。**git だけが通る**ため、
+Actions のログに頼らずリポジトリの中に記録を残す必要がある。
+
+異常マーカー（`src/ops/runlog.py` の `MARKERS`）は**実際に起きたバグから採る**。
+推測で増やすと誤検知で狼少年になる。**status が success でも中身は壊れうる**
+（バグ12件のうち失敗として通知されたのは1件だけ。残りは success のログから見つけた）。
+
 ## 開発コマンド
 
 ```bash
-pytest -q                                  # テスト（現在146件）
+pytest -q                                  # テスト（現在221件）
 python -m src.pipeline scout --sample      # 探索（APIキー不要）
 python -m src.pipeline run --sample        # 制作
 python -m src.pipeline report --days 7     # 週次レポート + 台帳
 python -m src.pipeline calibrate           # 予測 vs 実績（20件以降）
 python -m src.pipeline remind --days 7     # 未更新ニッチのリマインド
+python -m src.pipeline opreport            # 要確認だったスケジュール実行
+python -m src.pipeline critique --issue N  # 設計レビューを回す
 ```
 
 コードを変更したら必ず `pytest -q` を通してからコミットします。

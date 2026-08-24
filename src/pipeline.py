@@ -446,6 +446,38 @@ def _cmd_report(args) -> None:
         surface.create_issue(args.issue_title, report)
 
 
+def _cmd_oplog(args) -> None:
+    """スケジュール実行の結果をリポジトリに記録する。
+
+    ジョブが失敗すると記録はメールにしか残らず、Actions のログは API 経由でしか
+    読めない。api.github.com がプロキシで止まる環境（毎朝の自動点検）でも
+    git だけで追えるようにするため、ここでファイルに落とす。
+    """
+    from datetime import datetime, timezone
+
+    from .ops import RunLog
+
+    log_text = ""
+    if args.log:
+        path = Path(args.log)
+        if path.exists():
+            log_text = path.read_text(encoding="utf-8", errors="replace")
+        else:
+            logger.warning("ログが見つかりません: %s（成否のみ記録します）", args.log)
+
+    ts = args.ts or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    rec = RunLog().record(args.workflow, args.status, ts,
+                          log_text=log_text, run_url=args.run_url)
+    print(f"{rec.workflow}: status={rec.status} "
+          f"anomalies={rec.anomalies or 'なし'}")
+
+
+def _cmd_opreport(args) -> None:
+    from .ops import RunLog
+
+    print(RunLog().render_report(limit=args.limit))
+
+
 def _cmd_critique(args) -> None:
     """docs/REVIEW_REQUEST.md を LLM に投げ、指摘を Issue にコメントする。
 
@@ -532,6 +564,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_cal = sub.add_parser("calibrate", help="予測 vs 実績の対応表を出す")
     p_cal.set_defaults(func=_cmd_calibrate)
+
+    p_op = sub.add_parser("oplog", help="スケジュール実行の結果を記録する")
+    p_op.add_argument("--workflow", required=True)
+    p_op.add_argument("--status", default="", help="success / failure など")
+    p_op.add_argument("--log", default="", help="ログファイル（異常マーカーを拾う）")
+    p_op.add_argument("--run-url", default="")
+    p_op.add_argument("--ts", default="", help="省略時は現在時刻（UTC）")
+    p_op.set_defaults(func=_cmd_oplog)
+
+    p_opr = sub.add_parser("opreport", help="要確認の実行を一覧する")
+    p_opr.add_argument("--limit", type=int, default=10)
+    p_opr.set_defaults(func=_cmd_opreport)
 
     p_crit = sub.add_parser("critique", help="レビュー依頼を LLM に投げて指摘を受ける")
     p_crit.add_argument("--request", default="", help="依頼ファイル（既定 docs/REVIEW_REQUEST.md）")
