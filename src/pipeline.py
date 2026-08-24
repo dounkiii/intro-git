@@ -446,6 +446,36 @@ def _cmd_report(args) -> None:
         surface.create_issue(args.issue_title, report)
 
 
+def _cmd_critique(args) -> None:
+    """docs/REVIEW_REQUEST.md を LLM に投げ、指摘を Issue にコメントする。
+
+    オーナーが ChatGPT へコピペする作業をなくすためのコマンド。
+    """
+    from .review import Critic
+
+    config = Config.load()
+    critic = Critic(config)
+    from pathlib import Path as _Path
+    request = critic.load_request(_Path(args.request) if args.request else None)
+    if not request.strip():
+        logger.warning("レビュー依頼が空です（%s）。先に依頼を書いてください。",
+                       args.request or "docs/REVIEW_REQUEST.md")
+        return
+
+    result = critic.critique(request, contract=critic.load_contract())
+    if result is None:
+        return
+
+    body = result.render()
+    print(body)
+    if args.issue:
+        GitHubIssueSurface(config).comment(args.issue, body)
+    elif args.issue_title:
+        surface = GitHubIssueSurface(config)
+        surface.label = config.section("approval").get("review_label", "design-review")
+        surface.create_issue(args.issue_title, body)
+
+
 def _cmd_revenue(args) -> None:
     RevenueLog().log_revenue(args.amount, args.source, args.note)
     print(f"記録しました: {args.amount:,}円 / {args.source}")
@@ -502,6 +532,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_cal = sub.add_parser("calibrate", help="予測 vs 実績の対応表を出す")
     p_cal.set_defaults(func=_cmd_calibrate)
+
+    p_crit = sub.add_parser("critique", help="レビュー依頼を LLM に投げて指摘を受ける")
+    p_crit.add_argument("--request", default="", help="依頼ファイル（既定 docs/REVIEW_REQUEST.md）")
+    p_crit.add_argument("--issue", type=int, default=0, help="既存 Issue にコメントする")
+    p_crit.add_argument("--issue-title", default="", help="新規 Issue として投稿する")
+    p_crit.set_defaults(func=_cmd_critique)
 
     p_money = sub.add_parser("revenue", help="発生した収益を記録")
     p_money.add_argument("--amount", type=int, required=True, help="金額（円）")

@@ -1,0 +1,55 @@
+# 設計レビューを自動で回すジョブ。
+#
+# docs/REVIEW_REQUEST.md が更新されたら LLM に投げ、指摘を Issue にコメントする。
+# オーナーが ChatGPT へ長文をコピペする作業をなくすためのもの。
+# プロバイダは config.yaml の llm.provider に従う（Gemini 無料枠で動く）。
+name: design-review
+
+on:
+  push:
+    paths:
+      - 'docs/REVIEW_REQUEST.md'
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: 'コメント先の Issue 番号（空なら新規 Issue を作る）'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: design-review
+  cancel-in-progress: true
+
+jobs:
+  critique:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: 依存をインストール
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: レビューを実行
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ -n "${{ inputs.issue }}" ]; then
+            python -m src.pipeline critique --issue "${{ inputs.issue }}"
+          else
+            python -m src.pipeline critique \
+              --issue-title "設計レビュー $(date -u +%Y-%m-%d)"
+          fi

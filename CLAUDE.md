@@ -110,8 +110,19 @@ Secrets が必要なときは **値ではなく Secret 名だけ**を指示す�
 
   https://github.com/dounkiii/intro-git/blob/claude/mobile-automation-side-income-59tccj/docs/REVIEW_REQUEST.md
 
-ChatGPT からの回答は、共有リンクを受け取って読む。オーナーに長文を
-コピペさせない。リンクが取れない場合のみ本文を貼ってもらう。
+**レビューは自動で回る。** `docs/REVIEW_REQUEST.md` を push すると
+`design-review.yml` が LLM に投げ、指摘を `design-review` ラベルの Issue に
+コメントする。Claude Code はそれを読んで実装する。オーナーの作業は0。
+
+  python -m src.pipeline critique --issue <番号>    # 手元で回すとき
+
+レビュワーは迎合しやすいので、スキーマ側で具体性を強制している
+（`breaks_when` 必須 / 凍結対象への提案は `frozen_violation` へ分離 /
+blocker・should_fix が0件の回は明記する）。**同意しかない回が続くなら、
+レビュー自体の費用対効果を見直す。**
+
+ChatGPT に人力で見せたいときだけ、`docs/REVIEW_REQUEST.md` の URL を渡す
+（リポジトリは public）。長文をコピペさせない。
 
 ---
 
