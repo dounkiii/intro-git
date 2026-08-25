@@ -144,6 +144,19 @@ class ScoutPipeline:
             return f"⚠️ `{opportunity_id}` が見つかりません。"
 
         score = opportunity.score
+
+        # 換金経路の実在は「今どうか」であって候補の性質ではない。探索は新規候補
+        # しか採点し直さないので（既存は観測回数の更新のみ）、保存済みの値は
+        # 提携状況が変わっても古いまま残る。採用の瞬間に予測を凍結してしまうと、
+        # 「案件が実在した」という事実が実際と違う状態で台帳に固定される。
+        # ここで実測し直してから凍結する。推測（inferred）側は触らない。
+        observed_now = AffiliateEngine(self.config).has_direct_offer()
+        if score.monetization_observed is not observed_now:
+            logger.info("採用時に換金経路を実測し直しました: %s → %s",
+                        score.monetization_observed, observed_now)
+            score.monetization_observed = observed_now
+            self.store.upsert(opportunity)
+
         commitment = level or initial_level(
             opportunity.verdict, score.confidence, score.opportunity,
             now_confidence=self.scorer.now_confidence)

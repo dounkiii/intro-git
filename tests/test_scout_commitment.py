@@ -167,6 +167,7 @@ def test_明示的な採用は何もしないレベルに落とさない(tmp_pat
                       score=Score(scored=True), verdict="watch")
     monkeypatch.setattr(pipeline.store, "get", lambda _id: low)
     monkeypatch.setattr(pipeline.store, "set_status", lambda *a, **k: None)
+    monkeypatch.setattr(pipeline.store, "upsert", lambda *a, **k: None)
 
     reply = pipeline.adopt("low")
 

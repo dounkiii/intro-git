@@ -219,3 +219,48 @@ def test_LLMクライアントは同じインターフェースを持つ():
         # research のシグネチャが揃っていること（呼び出し側は1つ）
         assert inspect.signature(client.research).parameters.keys() == \
             inspect.signature(ClaudeClient.research).parameters.keys()
+
+
+# --------------------------------------------------------------------------
+# 5. 保存済みの観測値が古いまま凍結されないか
+# --------------------------------------------------------------------------
+
+def test_採用時に換金経路を実測し直す(tmp_path, monkeypatch):
+    """探索は新規候補しか採点し直さない（既存は観測回数の更新のみ）ので、
+    保存済みの monetization_observed は提携状況が変わっても古いまま残る。
+    採用の瞬間に凍結する予測がその古い値だと、「案件が実在した」という事実が
+    実際と違う状態で台帳に固定される。"""
+    import os
+
+    from src.config import Config
+    from src.scout.models import Candidate, Opportunity, Score
+    from src.scout.runner import ScoutPipeline
+
+    # 案件は1つも登録されていない（ハブだけ）
+    for slot in ("AFF_ACCOUNTING_SOFT", "AFF_TAX_ADVISOR", "AFF_FURUSATO",
+                 "AFF_SECURITIES", "AFF_INSURANCE", "AFF_PRODUCT_URL"):
+        monkeypatch.delenv(slot, raising=False)
+    monkeypatch.setenv("AFF_HUB_URL", "https://example.com/hub")
+
+    pipeline = ScoutPipeline(Config.load())
+    monkeypatch.setattr(pipeline.niches, "path", tmp_path / "niches.yaml")
+    monkeypatch.setattr(pipeline.ledger, "path", tmp_path / "ledger.jsonl")
+
+    # 「案件が実在した」として保存された古い候補
+    stale = Opportunity(
+        id="stale01", candidate=Candidate(title="古い候補"), verdict="watch",
+        score=Score(scored=True, monetization_observed=True,
+                    monetization_inferred=True))
+    monkeypatch.setattr(pipeline.store, "get", lambda _id: stale)
+    monkeypatch.setattr(pipeline.store, "set_status", lambda *a, **k: None)
+    saved: list = []
+    monkeypatch.setattr(pipeline.store, "upsert", lambda o: saved.append(o))
+
+    pipeline.adopt("stale01")
+
+    # 実測し直され、ハブしか無いので False になっていること
+    assert stale.score.monetization_observed is False
+    # 推測側は触らない（observed と inferred は別のもの）
+    assert stale.score.monetization_inferred is True
+    # 保存もされている（次回以降も古い値が残らない）
+    assert saved and saved[0] is stale
