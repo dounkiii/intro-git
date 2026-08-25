@@ -42,6 +42,10 @@ MARKERS: list[tuple[str, str, str]] = [
      "尺が上限を超えている。台本側に上限が伝わっていない"),
     ("traceback", r"Traceback \(most recent call last\)",
      "未捕捉の例外。実装バグ"),
+    # 2026-08-24: ワークフローの行継続を壊してしまい argparse が引数を拒否した。
+    # status=failure は記録できたが anomalies が空で、原因の手がかりが残らなかった。
+    ("cli_error", r"^usage: pipeline|pipeline: error:",
+     "コマンドの呼び方が壊れている。ワークフローの引数と行継続を確認"),
 ]
 
 
@@ -70,7 +74,7 @@ def scan(log_text: str) -> tuple[list[str], list[str]]:
     keys: list[str] = []
     notes: list[str] = []
     for key, pattern, note in MARKERS:
-        if re.search(pattern, log_text):
+        if re.search(pattern, log_text, re.MULTILINE):
             keys.append(key)
             notes.append(f"{key}: {note}")
     return keys, notes

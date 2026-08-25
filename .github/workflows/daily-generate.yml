@@ -65,9 +65,9 @@ jobs:
           SAMPLE_FLAG=""
           if [ "${{ inputs.sample }}" = "true" ]; then SAMPLE_FLAG="--sample"; fi
           set -o pipefail
-          python -m src.pipeline run \ 2>&1 | tee /tmp/pipeline.log
+          python -m src.pipeline run \
             --limit "${{ inputs.limit || '5' }}" \
-            --open-issue $SAMPLE_FLAG
+            --open-issue $SAMPLE_FLAG 2>&1 | tee /tmp/pipeline.log
 
       # 失敗した回も記録して push する（if: always()）。ジョブが落ちると
       # 下のコミットステップは動かず、記録がランナーごと消えるため独立させている。
@@ -90,7 +90,7 @@ jobs:
             exit 0
           fi
           git commit -m "chore: daily-generate の実行結果を記録 (${{ job.status }})"
-          git pull --rebase origin "${{ github.ref_name }}"
+          git pull --rebase --autostash origin "${{ github.ref_name }}"
           git push
 
       - name: 承認キューの状態をコミット
@@ -106,5 +106,5 @@ jobs:
           # 先にコミットしてから rebase する。他のワークフローや手元からの push と
           # 競合したときに、pull を省くと push が拒否されて状態が失われる。
           # `|| true` で握り潰さないのは、衝突したまま push すると状態が壊れるため。
-          git pull --rebase origin "${{ github.ref_name }}"
+          git pull --rebase --autostash origin "${{ github.ref_name }}"
           git push

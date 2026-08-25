@@ -94,5 +94,5 @@ jobs:
           # 先にコミットしてから rebase する。他のワークフローや手元からの push と
           # 競合したときに、pull を省くと push が拒否されて状態が失われる。
           # `|| true` で握り潰さないのは、衝突したまま push すると状態が壊れるため。
-          git pull --rebase origin "${{ github.ref_name }}"
+          git pull --rebase --autostash origin "${{ github.ref_name }}"
           git push

@@ -198,7 +198,14 @@ def test_全プロバイダがキーの環境変数名を持つ():
 
 def test_状態をコミットするワークフローは_push_前に_pull_する():
     """pull を省くと、他のワークフローや手元からの push と競合したときに
-    push が拒否され、その回の探索結果や承認結果が失われる。"""
+    push が拒否され、その回の探索結果や承認結果が失われる。
+
+    `--autostash` が要る理由（2026-08-24 に実際に起きた）: 記録ステップは
+    data/ops/ だけをコミットするので、パイプラインが書いた data/scout/ などは
+    未ステージのまま残る。その状態で pull --rebase すると
+    "cannot pull with rebase: You have unstaged changes" で落ち、
+    **成功していた探索ジョブごと failure になって結果が失われた。**
+    """
     import pathlib
 
     for name in ("daily-scout.yml", "daily-generate.yml", "approve-command.yml"):
@@ -208,8 +215,11 @@ def test_状態をコミットするワークフローは_push_前に_pull_す�
         pull = text.index("git pull --rebase")
         push = text.index("git push")
         assert pull < push, name
-        # 衝突を握り潰したまま push すると状態が壊れる
-        assert "git pull --rebase origin \"${{ github.ref_name }}\"" in text, name
+        # 未ステージの生成物があっても落ちないこと
+        assert "git pull --rebase --autostash origin" in text, name
+        # 衝突は握り潰さない（|| true を付けると壊れた状態を push しうる）
+        assert "git pull --rebase --autostash origin \"${{ github.ref_name }}\" || true" \
+            not in text, name
 
 
 def test_台本の指示に尺の上下限が入る():

@@ -114,3 +114,27 @@ def test_記録はログをファイル経由で受け取る():
         assert "set -o pipefail" in text, name
         assert "tee /tmp/pipeline.log" in text, name
         assert "--log /tmp/pipeline.log" in text, name
+
+
+def test_コマンドの呼び方が壊れた回を拾える():
+    """2026-08-24: ワークフローの行継続を壊し argparse が引数を拒否した。
+    status=failure は記録できたが anomalies が空で手がかりが残らなかった。"""
+    log = """usage: pipeline [-h]
+                {scout,run,review,command,publish,report,remind,calibrate}
+                ...
+pipeline: error: unrecognized arguments:  2"""
+
+    keys, notes = scan(log)
+
+    assert "cli_error" in keys
+    assert any("行継続" in n for n in notes)
+
+
+def test_失敗した回に手がかりが残る():
+    """失敗を記録できても anomalies が空だと、朝の点検が次に何を見るか分からない。"""
+    from src.ops.runlog import MARKERS
+
+    covered = {k for k, _, _ in MARKERS}
+
+    # 実際に起きた失敗の型は最低限カバーしていること
+    assert {"traceback", "cli_error"} <= covered
