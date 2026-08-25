@@ -109,19 +109,54 @@ class RunLog:
                 out.append(json.loads(line))
         return out
 
+    def latest_per_workflow(self) -> dict[str, dict]:
+        """ワークフローごとの最新の記録。"""
+        latest: dict[str, dict] = {}
+        for r in self.rows():
+            latest[r.get("workflow", "?")] = r
+        return latest
+
     def pending(self, limit: int = 10) -> list[dict]:
-        """要確認の回を新しい順に返す。毎朝の点検が最初に見るもの。"""
-        flagged = [r for r in self.rows()
+        """いま壊れているワークフローだけを返す。毎朝の点検が最初に見るもの。
+
+        **過去の失敗は、その後に成功していれば出さない。** 直した失敗を毎朝
+        蒸し返すと、点検が解決済みの問題を調べ直すことになり、失敗の履歴が
+        増えるほど無駄が増える。「このワークフローは今どうか」を返す。
+
+        時間窓で切らないのは、点検が1日飛んでも壊れたままなら報告してほしいため。
+        """
+        flagged = [r for r in self.latest_per_workflow().values()
                    if r.get("status") != "success" or r.get("anomalies")]
+        flagged.sort(key=lambda r: r.get("ts", ""))
         return flagged[-limit:][::-1]
+
+    def recovered(self) -> list[dict]:
+        """直近で失敗したが、その後の実行で回復したもの。
+
+        対処は不要だが、繰り返すなら不安定さの手がかりになるので出す。
+        """
+        out = []
+        for workflow, latest in self.latest_per_workflow().items():
+            if latest.get("status") != "success" or latest.get("anomalies"):
+                continue
+            history = [r for r in self.rows() if r.get("workflow") == workflow]
+            if any(r.get("status") != "success" or r.get("anomalies")
+                   for r in history[:-1]):
+                out.append(latest)
+        return out
 
     def render_report(self, limit: int = 10) -> str:
         """毎朝の点検が読む要約（Markdown）。"""
         flagged = self.pending(limit)
+        rows = self.rows()
         if not flagged:
-            rows = self.rows()
-            return (f"要確認の実行はありません（記録 {len(rows)}件）。"
-                    if rows else "実行の記録がまだありません。")
+            if not rows:
+                return "実行の記録がまだありません。"
+            lines = [f"要確認の実行はありません（記録 {len(rows)}件）。"]
+            for r in self.recovered():
+                lines.append(f"- {r.get('workflow')}: 過去に失敗があるが"
+                             f"直近は成功（{r.get('ts')}）。対処不要")
+            return "\n".join(lines)
 
         lines = [f"# 要確認の実行 {len(flagged)}件", ""]
         for r in flagged:

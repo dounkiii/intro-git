@@ -138,3 +138,47 @@ def test_失敗した回に手がかりが残る():
 
     # 実際に起きた失敗の型は最低限カバーしていること
     assert {"traceback", "cli_error"} <= covered
+
+
+def test_直した失敗を毎朝蒸し返さない(tmp_path):
+    """過去の失敗をそのまま出し続けると、点検が解決済みの問題を調べ直す。
+    失敗の履歴が増えるほど無駄が増える。"""
+    log = RunLog(tmp_path / "runs.jsonl")
+    log.record("daily-generate", "failure", ts="2026-08-24T21:16:00+00:00")
+    log.record("daily-generate", "success", ts="2026-08-25T05:00:00+00:00")
+
+    assert log.pending() == []
+    report = log.render_report()
+    assert "要確認の実行はありません" in report
+    # ただし「回復した」ことは分かるようにする（繰り返すなら不安定さの手がかり）
+    assert "直近は成功" in report
+
+
+def test_まだ壊れているものは日が経っても出す(tmp_path):
+    """時間窓で切ると、点検が1日飛んだときに壊れたままの回を見落とす。"""
+    log = RunLog(tmp_path / "runs.jsonl")
+    log.record("daily-scout", "success", ts="2026-08-20T20:00:00+00:00")
+    log.record("daily-generate", "failure", ts="2026-08-20T21:00:00+00:00")
+
+    pending = log.pending()
+
+    assert [p["workflow"] for p in pending] == ["daily-generate"]
+
+
+def test_ワークフローごとに最新だけを見る(tmp_path):
+    """片方が直っても、もう片方が壊れていれば出す。"""
+    log = RunLog(tmp_path / "runs.jsonl")
+    log.record("daily-scout", "failure", ts="1")
+    log.record("daily-generate", "failure", ts="2")
+    log.record("daily-scout", "success", ts="3")
+
+    assert [p["workflow"] for p in log.pending()] == ["daily-generate"]
+
+
+def test_成功でも異常が残っていれば出し続ける(tmp_path):
+    """status だけ見ると、success の裏で壊れている回を取りこぼす。"""
+    log = RunLog(tmp_path / "runs.jsonl")
+    log.record("daily-scout", "failure", ts="1")
+    log.record("daily-scout", "success", ts="2", log_text="未採点")
+
+    assert [p["workflow"] for p in log.pending()] == ["daily-scout"]
