@@ -182,3 +182,21 @@ def test_成功でも異常が残っていれば出し続ける(tmp_path):
     log.record("daily-scout", "success", ts="2", log_text="未採点")
 
     assert [p["workflow"] for p in log.pending()] == ["daily-scout"]
+
+
+def test_数秒の尺超過は要確認にしない():
+    """2026-08-25 の実測は 91.3秒 / 上限 90秒 の 1.3秒超過だった。
+    これを毎朝拾うと誤検知で狼少年になる。builder 側が許容範囲を
+    INFO に落とすので、マーカーは拾わないこと。"""
+    keys, _ = scan("INFO src.video.builder: 合計尺 91.3秒"
+                   "（max_duration_sec=90 を 1.3秒 超過）。許容範囲なので対処不要")
+
+    assert "duration_over" not in keys
+
+
+def test_大きな尺超過は要確認にする():
+    """修正前の実測は 115.0秒 / 上限 90秒 だった。これは拾う。"""
+    keys, _ = scan("WARNING src.video.builder: 合計尺が 115.0秒で "
+                   "max_duration_sec=90 を超えています。")
+
+    assert "duration_over" in keys

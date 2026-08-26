@@ -22,6 +22,11 @@ from ..models import VideoScript
 
 logger = logging.getLogger(__name__)
 
+# max_duration_sec の超過を「対処すべき」と見なす割合。
+# 台本側に上限を伝えても数秒はズレる（実測 90秒上限に対し 91.3秒）。
+# それを毎朝の点検が要確認として拾うと、誤検知で狼少年になる。
+MAX_DURATION_TOLERANCE = 0.10
+
 
 class VideoBuilder:
     def __init__(self, config: Config):
@@ -117,10 +122,16 @@ class VideoBuilder:
             prepared[-1] = (img, audio, dur + deficit)
             logger.info("合計尺 %.1f秒 → %.1f秒に延長しました（min_duration_sec=%d）",
                         total, total + deficit, self.min_duration)
-        elif total > self.max_duration:
+        elif total > self.max_duration * (1 + MAX_DURATION_TOLERANCE):
             logger.warning("合計尺が %.1f秒で max_duration_sec=%d を超えています。"
                            "narration を短くするか slides_per_video を減らしてください。",
                            total, self.max_duration)
+        elif total > self.max_duration:
+            # 数秒の超過で警告を出すと、毎朝の点検が要確認として拾ってしまう。
+            # 台本側に上限を伝えてあるので数秒のズレは残るが、対処すべき問題ではない。
+            logger.info("合計尺 %.1f秒（max_duration_sec=%d を %.1f秒 超過）。"
+                        "許容範囲なので対処不要", total, self.max_duration,
+                        total - self.max_duration)
         return prepared
 
     def _draw_slide(self, path: Path, text: str, index: int,
