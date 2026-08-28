@@ -16,6 +16,9 @@ from ..models import Article, VideoScript
 
 logger = logging.getLogger(__name__)
 
+# 人間が判断を下した状態。再生成で上書きしてはいけない。
+DECIDED = ("approved", "rejected", "published")
+
 
 def _relative(path: Path) -> str:
     """リポジトリ相対のパスにする。
@@ -60,6 +63,16 @@ class ReviewQueue:
     def enqueue(self, item_id: str, script: VideoScript, video_path: Path,
                 safety_flags: list[str], category: str = "",
                 article: Article | None = None) -> ReviewItem:
+        # 人間が判断済みのものは上書きしない。サンプルデータは毎回同じ id を
+        # 生成するので、上書きすると**承認が翌朝の生成で消える**。実際に
+        # 2026-08-26 の承認2件が 08-27 の生成で pending に戻っていた。
+        # 「人間の明示指示が無視される」は OPERATIONS.md §2 の修正対象。
+        existing = self.get(item_id)
+        if existing is not None and existing.status in DECIDED:
+            logger.info("判断済みのため上書きしません: %s (status=%s)",
+                        item_id, existing.status)
+            return existing
+
         item = ReviewItem(
             id=item_id,
             status="pending",

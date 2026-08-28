@@ -243,3 +243,38 @@ def test_台本の指示に尺の上下限が入る():
 
     assert str(video["min_duration_sec"]) in captured["prompt"]
     assert str(video["max_duration_sec"]) in captured["prompt"]
+
+
+def test_承認済みは翌日の生成で上書きされない(tmp_path):
+    """サンプルデータは毎回同じ id を生成するので、上書きすると承認が消える。
+    実際に 2026-08-26 の承認2件が 08-27 の生成で pending に戻っていた。"""
+    queue = ReviewQueue(tmp_path)
+    _enqueue(queue, "tax-1", [])
+    queue.approve("tax-1")
+
+    # 翌朝の生成が同じ id で再投入する
+    _enqueue(queue, "tax-1", [])
+
+    assert queue.get("tax-1").status == "approved"
+
+
+def test_未判断のものは上書きしてよい(tmp_path):
+    """pending のままなら新しい生成内容で置き換える（古い下書きを残さない）。"""
+    queue = ReviewQueue(tmp_path)
+    _enqueue(queue, "tax-1", [])
+    _enqueue(queue, "tax-1", ["unverified_claim"])
+
+    item = queue.get("tax-1")
+    assert item.status == "pending"
+    assert item.safety_flags == ["unverified_claim"]
+
+
+def test_却下も上書きされない(tmp_path):
+    """却下したものが翌朝 pending に戻ると、また判断させられる。"""
+    queue = ReviewQueue(tmp_path)
+    _enqueue(queue, "tax-1", [])
+    queue.reject("tax-1", "制度の解釈が違う")
+
+    _enqueue(queue, "tax-1", [])
+
+    assert queue.get("tax-1").status == "rejected"
