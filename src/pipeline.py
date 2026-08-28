@@ -29,6 +29,7 @@ from .monetize.revenue import RevenueLog
 from .processing.classifier import Classifier
 from .processing.safety import SafetyChecker
 from .processing.summarizer import Summarizer
+from .publishers.hatena import HatenaPublisher
 from .publishers.github_issue import (
     Command,
     GitHubIssueSurface,
@@ -58,6 +59,7 @@ class Pipeline:
         approval = self.config.section("approval")
         self.exclude_flagged = bool(approval.get("exclude_flagged_from_bulk", True))
         self.max_items_per_issue = int(approval.get("max_items_per_issue", 5))
+        self.hatena = HatenaPublisher(self.config)
 
     # ------------------------------------------------------------------
     def run(self, limit: int | None = None, use_sample: bool | None = None,
@@ -262,10 +264,15 @@ class Pipeline:
                 result = self.publisher.publish(video_path, script)
 
                 article_path = ""
+                hatena: dict = {}
                 if item.article:
-                    article_path = str(self._write_article(item.id, Article(**item.article)))
+                    article = Article(**item.article)
+                    article_path = str(self._write_article(item.id, article))
+                    # 承認したらそのまま公開されるようにする。手でコピペしない。
+                    hatena = self.hatena.publish(article)
 
-                results.append({"id": item.id, "tiktok": result, "article": article_path})
+                results.append({"id": item.id, "tiktok": result,
+                                "article": article_path, "hatena": hatena})
                 if not self.config.dry_run:
                     self.queue.set_status(item.id, "published")
                     self.revenue.log_post(

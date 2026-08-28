@@ -185,6 +185,12 @@ video:
   tts_lang: 'ja'
 
 publishing:
+  # はてなブログ AtomPub（公式API）。note には公式の投稿APIが無く、
+  # 非公式APIはログインCookieが要るので採用しない（src/publishers/hatena.py）。
+  # 1本目を確認したら false にする。以後は /approve だけで公開される。
+  hatena_draft: true
+  hatena_categories: ['お金', '税金']
+  hatena_timeout: 30
   # 投稿時のプライバシー。未審査アプリは SELF_ONLY のみ許可される。
   privacy_level: 'SELF_ONLY'   # SELF_ONLY | MUTUAL_FOLLOW_FRIENDS | PUBLIC_TO_EVERYONE
   disable_comment: false
