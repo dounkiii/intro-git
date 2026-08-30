@@ -7,14 +7,25 @@ from src.publishers.review_queue import ReviewQueue
 
 
 def test_run_with_sample_data(tmp_path, monkeypatch):
-    # ffmpeg 無し環境でも絵コンテJSONにフォールバックして完走する
+    """ffmpeg 無し環境でも絵コンテJSONにフォールバックして完走する。
+
+    出力先を tmp_path に逃がすのは、サンプルの item_id が本番と同じだから。
+    `tax-sample-t1` などは実際に承認待ちに積まれている ID で、逃がさないと
+    このテストを流すだけで**その日に生成された本物の記事がテンプレ出力で
+    上書きされる**（2026-08-30 に実際に3件を潰した）。
+    """
     os.environ["DRY_RUN"] = "true"
     os.environ["REVIEW_REQUIRED"] = "true"
+    monkeypatch.setattr("src.pipeline.OUTPUT_DIR", tmp_path / "output")
+    monkeypatch.setattr("src.pipeline.ARTICLE_DIR", tmp_path / "articles")
+    monkeypatch.setattr("src.pipeline.ReviewQueue",
+                        lambda *a, **k: ReviewQueue(tmp_path / "review"))
+
     pipeline = Pipeline(Config.load())
     item_ids = pipeline.run(limit=5, use_sample=True)
     assert len(item_ids) >= 1
 
-    queue = ReviewQueue()
+    queue = ReviewQueue(tmp_path / "review")
     pending = queue.list_items(status="pending")
     assert any(it.id in item_ids for it in pending)
 

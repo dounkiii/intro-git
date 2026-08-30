@@ -276,3 +276,13 @@ def test_期待するワークフローに点検自身が入っている():
 
     assert "morning-check" in EXPECTED_WORKFLOWS
     assert {"daily-scout", "daily-generate"} <= set(EXPECTED_WORKFLOWS)
+
+
+def test_実データのガードは除外に理由を求める():
+    """conftest.py は pytest がテストとして収集しないので、ここで検証する。
+    理由なしの除外を許すと、除外リストが守り漏れの隠し場所になる。"""
+    from tests.conftest import EXEMPT
+
+    assert EXEMPT, "除外が空なら理由の検証も要らないはずで、書き間違いの可能性"
+    for name, reason in EXEMPT.items():
+        assert reason.strip(), f"{name} の除外理由が空です"
