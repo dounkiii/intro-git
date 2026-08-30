@@ -200,3 +200,79 @@ def test_大きな尺超過は要確認にする():
                    "max_duration_sec=90 を超えています。")
 
     assert "duration_over" in keys
+
+
+# --------------------------------------------------------------------------
+# 記録が途絶えたワークフローを拾う
+#
+# ここまでの点検は「記録された回」しか見ていなかった。1回も動かなければ行が
+# 無く、pending() は空を返し、レポートは静かなままだった。朝の点検自身が
+# 2026-08-24 / 08-25 / 08-30 と3回無記録だったのに異常なしに見えていたのはこれ。
+# --------------------------------------------------------------------------
+
+def _now():
+    from datetime import datetime, timezone
+    return datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+
+
+def test_一度も記録が無いワークフローを拾う(tmp_path):
+    """これが本題。動かなかったワークフローには行が無いので、
+    行を見ているだけでは永久に気づけない。"""
+    log = RunLog(tmp_path / "runs.jsonl")
+    log.record("daily-scout", "success", ts="2026-08-30T02:00:00+00:00")
+
+    missing = dict(log.stale(now=_now()))
+
+    assert missing["morning-check"] == "記録なし"
+    assert "daily-scout" not in missing
+
+
+def test_点検が黙って落ちた夜を検知する(tmp_path):
+    """朝の点検は発火して success で終わったのに記録を残さなかった。
+    Routine 側は成功に見えるので、気づけるのはリポジトリの中だけ。"""
+    log = RunLog(tmp_path / "runs.jsonl")
+    log.record("morning-check", "success", ts="2026-08-27T22:20:00+00:00")
+
+    missing = dict(log.stale(now=_now()))
+
+    assert missing["morning-check"] == "2026-08-27T22:20:00+00:00"
+
+
+def test_cronの遅れを途絶と誤検知しない(tmp_path):
+    """GitHub の schedule は大きく遅れる。実測で 20:00 UTC 予定の回が
+    翌 04:03 に動いていた（約8時間）。24時間で切ると誤検知になる。"""
+    log = RunLog(tmp_path / "runs.jsonl")
+    for w in ("daily-scout", "daily-generate", "morning-check"):
+        # 前日の予定から8時間ずれて動いた回
+        log.record(w, "success", ts="2026-08-29T04:03:00+00:00")
+
+    assert log.stale(now=_now()) == []
+
+
+def test_読めない時刻を古い記録と決めつけない(tmp_path):
+    """時刻が壊れているのは「途絶えた」とは違う異常。混ぜると原因が分からない。"""
+    log = RunLog(tmp_path / "runs.jsonl")
+    log.record("daily-scout", "success", ts="こわれた値")
+
+    reason = dict(log.stale(now=_now()))["daily-scout"]
+
+    assert "読めません" in reason
+
+
+def test_途絶はレポートに出る(tmp_path):
+    """pending が0件でも「静かな夜」と「異常なし」を混同しないこと。"""
+    log = RunLog(tmp_path / "runs.jsonl")
+    log.record("daily-scout", "success", ts="2026-08-30T02:00:00+00:00")
+
+    report = log.render_report(now=_now())
+
+    assert "記録が途絶えています" in report
+    assert "morning-check" in report
+
+
+def test_期待するワークフローに点検自身が入っている():
+    """見張り番を見張る対象から外すと、黙って落ちても誰も気づかない。"""
+    from src.ops.runlog import EXPECTED_WORKFLOWS
+
+    assert "morning-check" in EXPECTED_WORKFLOWS
+    assert {"daily-scout", "daily-generate"} <= set(EXPECTED_WORKFLOWS)

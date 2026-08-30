@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import datetime, timezone
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -47,6 +48,23 @@ MARKERS: list[tuple[str, str, str]] = [
     ("cli_error", r"^usage: pipeline|pipeline: error:",
      "コマンドの呼び方が壊れている。ワークフローの引数と行継続を確認"),
 ]
+
+
+# 動いていることを期待するワークフローと、記録が途絶えたと見なす時間（時）。
+#
+# **なぜ必要か。** ここまでの点検は「記録された回」しか見ていなかった。
+# 1回も動かなければ行が無く、`pending()` は空を返し、レポートは静かなままになる。
+# 実際に朝の点検（morning-check）は3回続けて記録を残さなかったのに、
+# リポジトリ上は異常なしに見えていた。**沈黙は成功と区別できない。**
+#
+# しきい値が24時間ではなく36時間なのは、GitHub の schedule が大きく遅れるため。
+# 実測で 20:00 UTC 予定の回が翌 04:03 に動いている（約8時間）。24時間で切ると
+# 正常に動いた翌日に誤検知する。
+EXPECTED_WORKFLOWS: dict[str, int] = {
+    "daily-scout": 36,
+    "daily-generate": 36,
+    "morning-check": 36,
+}
 
 
 @dataclass
@@ -130,6 +148,31 @@ class RunLog:
         flagged.sort(key=lambda r: r.get("ts", ""))
         return flagged[-limit:][::-1]
 
+    def stale(self, now: datetime | None = None) -> list[tuple[str, str]]:
+        """記録が途絶えているワークフローを返す。(名前, 最後の記録) の並び。
+
+        **`pending()` では拾えない異常。** あちらは記録された回を見るので、
+        「1回も動かなかった」「動いたが記録を残さずに終わった」は行が無く、
+        何も報告されない。実際に朝の点検が3回続けて無記録だったのに、
+        レポートは「要確認の実行はありません」を出していた。
+        """
+        now = now or datetime.now(timezone.utc)
+        latest = self.latest_per_workflow()
+        out: list[tuple[str, str]] = []
+        for workflow, hours in EXPECTED_WORKFLOWS.items():
+            row = latest.get(workflow)
+            if row is None:
+                out.append((workflow, "記録なし"))
+                continue
+            ts = _parse_ts(row.get("ts", ""))
+            if ts is None:
+                # 記録はあるが時刻が読めない。判定不能なので黙って落とさない
+                out.append((workflow, f"時刻を読めません（{row.get('ts')!r}）"))
+                continue
+            if (now - ts).total_seconds() > hours * 3600:
+                out.append((workflow, row.get("ts", "")))
+        return out
+
     def recovered(self) -> list[dict]:
         """直近で失敗したが、その後の実行で回復したもの。
 
@@ -145,26 +188,60 @@ class RunLog:
                 out.append(latest)
         return out
 
-    def render_report(self, limit: int = 10) -> str:
-        """毎朝の点検が読む要約（Markdown）。"""
-        flagged = self.pending(limit)
+    def render_report(self, limit: int = 10,
+                      now: datetime | None = None) -> str:
+        """毎朝の点検が読む要約（Markdown）。
+
+        **失敗した回だけでなく、途絶えたワークフローも出す。** 記録が無いことは
+        レポート上で成功と見分けがつかず、実際にそれで3回見落としている。
+        """
         rows = self.rows()
+        if not rows:
+            return "実行の記録がまだありません。"
+
+        flagged = self.pending(limit)
+        stale = self.stale(now)
+        lines: list[str] = []
+
+        if stale:
+            lines.append(f"# 記録が途絶えています {len(stale)}件")
+            lines.append("")
+            for workflow, last in stale:
+                lines.append(f"## {workflow} — 最後の記録: {last}")
+                lines.append("- ⚠️ 動いていないか、動いたが記録を残さずに"
+                             "終わっている。ワークフローの schedule と、"
+                             "記録ステップの push が通っているかを確認")
+                lines.append("")
+
+        if flagged:
+            lines.append(f"# 要確認の実行 {len(flagged)}件")
+            lines.append("")
+            for r in flagged:
+                lines.append(f"## {r.get('workflow')} — {r.get('status')} "
+                             f"（{r.get('ts')}）")
+                if r.get("run_url"):
+                    lines.append(f"- ログ: {r['run_url']}")
+                for note in r.get("notes") or []:
+                    lines.append(f"- ⚠️ {note}")
+                lines.append("")
+
         if not flagged:
-            if not rows:
-                return "実行の記録がまだありません。"
-            lines = [f"要確認の実行はありません（記録 {len(rows)}件）。"]
+            lines.append(f"要確認の実行はありません（記録 {len(rows)}件）。")
             for r in self.recovered():
                 lines.append(f"- {r.get('workflow')}: 過去に失敗があるが"
                              f"直近は成功（{r.get('ts')}）。対処不要")
-            return "\n".join(lines)
 
-        lines = [f"# 要確認の実行 {len(flagged)}件", ""]
-        for r in flagged:
-            lines.append(f"## {r.get('workflow')} — {r.get('status')} "
-                         f"（{r.get('ts')}）")
-            if r.get("run_url"):
-                lines.append(f"- ログ: {r['run_url']}")
-            for note in r.get("notes") or []:
-                lines.append(f"- ⚠️ {note}")
-            lines.append("")
         return "\n".join(lines)
+
+
+def _parse_ts(value: str) -> datetime | None:
+    """記録の時刻を読む。読めなければ None（推測で埋めない）。
+
+    テストは `ts="1"` のような固定値を使うので、読めない値は普通に来る。
+    それを「古い」と決めつけると、テスト用の記録が毎回途絶扱いになる。
+    """
+    try:
+        ts = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
