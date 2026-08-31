@@ -85,7 +85,9 @@ class VideoBuilder:
                     audio_path = None
                 prepared.append((img_path, audio_path, dur))
 
-            prepared = self._fit_duration(prepared)
+            prepared = self._fit_duration(
+                prepared,
+                narration_chars=sum(len(n) for n in script.narration))
 
             concat_lines: list[str] = []
             for i, (img_path, audio_path, dur) in enumerate(prepared):
@@ -105,7 +107,8 @@ class VideoBuilder:
         logger.info("動画を生成しました: %s", out_path)
         return out_path
 
-    def _fit_duration(self, prepared: list[tuple[Path, Path | None, float]]
+    def _fit_duration(self, prepared: list[tuple[Path, Path | None, float]],
+                      narration_chars: int = 0
                       ) -> list[tuple[Path, Path | None, float]]:
         """合計尺を [min_duration, max_duration] に寄せる。
 
@@ -116,6 +119,14 @@ class VideoBuilder:
             return prepared
 
         total = sum(d for _, _, d in prepared)
+
+        # 実測の読み上げ速度を残す。台本側は文字数で尺を制御しているので
+        # （summarizer.SPEECH_CHARS_PER_SEC）、その換算が正しいかを確かめる
+        # 手がかりが無いと、上限を超えても直す根拠が持てない。
+        if narration_chars and total > 0:
+            logger.info("読み上げ速度の実測: %.2f字/秒（%d字 / %.1f秒）",
+                        narration_chars / total, narration_chars, total)
+
         if total < self.min_duration:
             deficit = self.min_duration - total
             img, audio, dur = prepared[-1]

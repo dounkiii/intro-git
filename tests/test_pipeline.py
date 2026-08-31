@@ -73,3 +73,57 @@ def test_トークンがなければ本番指定でもサンプルに落ちる(m
     collected = collector.collect(use_sample=False)
 
     assert any(collected.values())        # サンプルで中身が返る
+
+
+# --- 2026-08-30 の duration_over ---------------------------------------------
+
+def test_台本プロンプトは尺を文字数で伝える():
+    """秒で指示しても LLM は自分の文章の読み上げ時間を見積もれない。
+
+    実測: narration 400字が上限90秒を超えた（duration_over）。プロンプトには
+    「62〜90秒に収める」と書いてあったので、秒では効いていない。
+    """
+    import inspect
+
+    from src.config import Config
+    from src.processing.summarizer import Summarizer
+
+    s = Summarizer(Config.load())
+    lo, hi = s._char_budget()
+    src = inspect.getsource(s._script_via_claude)
+
+    assert "_char_budget()" in src, "プロンプトが文字数を渡していない"
+    assert lo < hi
+    # 上限を超えた実測値（400字）が予算の外にあること
+    assert 400 > hi, f"400字が上限 {hi}字 の中に入ってしまっている"
+
+
+def test_文字数の予算は設定の尺から作る():
+    """config で尺を変えたら予算も動くこと。二重管理にしない。"""
+    from src.config import Config
+    from src.processing.summarizer import SPEECH_CHARS_PER_SEC, Summarizer
+
+    config = Config.load()
+    config.section("video")["min_duration_sec"] = 30
+    config.section("video")["max_duration_sec"] = 60
+
+    lo, hi = Summarizer(config)._char_budget()
+
+    assert lo == int(30 * SPEECH_CHARS_PER_SEC)
+    assert hi == int(60 * SPEECH_CHARS_PER_SEC)
+
+
+def test_読み上げ速度の実測がログに出る(caplog):
+    """換算が正しいか確かめる手がかりが無いと、上限を超えても直す根拠が無い。"""
+    from pathlib import Path
+
+    from src.config import Config
+    from src.video.builder import VideoBuilder
+
+    builder = VideoBuilder(Config.load())
+    prepared = [(Path("a.png"), None, 25.0), (Path("b.png"), None, 25.0)]
+
+    with caplog.at_level("INFO"):
+        builder._fit_duration(prepared, narration_chars=200)
+
+    assert "読み上げ速度の実測: 4.00字/秒" in caplog.text

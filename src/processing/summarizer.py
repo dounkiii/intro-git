@@ -54,6 +54,19 @@ ARTICLE_SCHEMA = {
 }
 
 
+# 読み上げ速度（文字/秒）。narration の文字数から尺を見積もるのに使う。
+#
+# **なぜ秒で指示しないのか。** 台本プロンプトには「{min}〜{max}秒に収める」と
+# 秒で書いていたが、LLM は自分の書いた文章の読み上げ時間を見積もれない。
+# 2026-08-30 の実測では 400字の narration が上限90秒を超え（duration_over）、
+# 秒で伝えても効いていないことが分かった。文字数なら数えられる。
+#
+# 値の根拠は実測1点のみ（400字 → 99秒超、つまり 4.04字/秒 以下）。
+# 精度を上げるため builder 側で実測値をログに出している（_fit_duration）。
+# ログに 4.0 から離れた値が続いたらここを直す。
+SPEECH_CHARS_PER_SEC = 4.0
+
+
 class Summarizer:
     def __init__(self, config: Config):
         self.config = config
@@ -129,6 +142,14 @@ class Summarizer:
             lines.append(f"注意フラグ: {', '.join(topic.safety_flags)}")
         return "\n".join(lines)
 
+    def _char_budget(self) -> tuple[int, int]:
+        """narration の合計文字数の下限・上限。
+
+        秒で指示しても LLM は守れないので、読み上げ速度で文字数に換算して渡す。
+        """
+        return (int(self.min_duration * SPEECH_CHARS_PER_SEC),
+                int(self.max_duration * SPEECH_CHARS_PER_SEC))
+
     def _script_via_claude(self, topic: Topic) -> dict | None:
         prompt = f"""次の話題から、縦型ショート動画の台本を作ってください。
 
@@ -136,8 +157,9 @@ class Summarizer:
 
 【要件】
 - slides と narration は必ず同じ要素数（{self.slide_count}個）にする
-- narration は全部読んで {self.min_duration}〜{self.max_duration}秒に収まる長さにする
-  （下限: TikTok の収益化対象は1分以上の動画なので短くしない。
+- narration の合計文字数を {self._char_budget()[0]}〜{self._char_budget()[1]}字にする
+  （読み上げると {self.min_duration}〜{self.max_duration}秒になる長さ。
+    下限: TikTok の収益化対象は1分以上の動画なので短くしない。
     上限: 超えると builder が警告するだけで切り詰められず、尺が伸び続ける）
 - hook は冒頭2秒で流し見を止める1文。煽らず、損得か期限を示す
 - slides は画面に出す短いテキスト（各30字以内）
