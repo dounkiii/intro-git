@@ -50,7 +50,9 @@ jobs:
           AFF_SECURITIES: ${{ secrets.AFF_SECURITIES }}
           AFF_INSURANCE: ${{ secrets.AFF_INSURANCE }}
           NOTE_SESSION_V5: ${{ secrets.NOTE_SESSION_V5 }}
+          NOTE_GQL_AUTH_TOKEN: ${{ secrets.NOTE_GQL_AUTH_TOKEN }}
           NOTE_XSRF_TOKEN: ${{ secrets.NOTE_XSRF_TOKEN }}
+          NOTE_EXTRA_COOKIES: ${{ secrets.NOTE_EXTRA_COOKIES }}
           HATENA_USER_ID: ${{ secrets.HATENA_USER_ID }}
           HATENA_BLOG_ID: ${{ secrets.HATENA_BLOG_ID }}
           HATENA_API_KEY: ${{ secrets.HATENA_API_KEY }}

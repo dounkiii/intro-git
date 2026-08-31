@@ -126,13 +126,20 @@ DevTools でのキャプチャ（PC作業）が必要で止まった。はてな
 だから既定は下書き（`publishing.note_draft`）。1本目をオーナーが note の画面で
 見て確認したら false にする。
 
-必要な Secret は2つとも**必須**。`NOTE_SESSION_V5`（Cookie
-`_note_session_v5` の値）と `NOTE_XSRF_TOKEN`（Cookie `XSRF-TOKEN` の値）。
+必要な Secret は2つとも**必須**。
 
-**2026-08-31 に実測**: セッション Cookie だけで本番に投げると **403**。note は
-double-submit cookie 方式で、**Cookie とヘッダの両方**に CSRF トークンが必要。
-ヘッダ側は URL デコードした値、Cookie 側は生の値を入れる（ブラウザ上の JS と
-同じ）。「公開実装1件は XSRF を送っていない」は当てにならなかった。
+  `NOTE_SESSION_V5`       Cookie `_note_session_v5`
+  `NOTE_GQL_AUTH_TOKEN`   Cookie `note_gql_auth_token`（JWT。これが認証の本体）
+
+**2026-08-31 の実測でここを2回直した。** まず `_note_session_v5` だけ送って
+**403**。原因を CSRF だと推測し `XSRF-TOKEN` Cookie を足したが、オーナーの
+ブラウザを見ると **note.com に `XSRF-TOKEN` Cookie は存在しなかった**。
+実在するのは6つで、認証に効くのは `note_gql_auth_token`。
+**推測した対策より、実際の Cookie 一覧が勝つ。**
+
+`NOTE_XSRF_TOKEN` は任意（ヘッダにだけ載せる）。上の2つで足りないときは
+`NOTE_EXTRA_COOKIES` に `k=v; k=v` の形で残りを足せる。仕様が読めない相手
+なので、Cookie が1つ増えるたびにコードを直す形にしない。
 
 **ログインし直すと値が変わる**ので、401/403 で止まったら差し替え。
 これが非公式APIの代償。エラーログには**どのリクエストで落ちたか**
@@ -242,7 +249,7 @@ Actions のログに頼らずリポジトリの中に記録を残す必要があ
 ## 開発コマンド
 
 ```bash
-pytest -q                                  # テスト（現在326件）
+pytest -q                                  # テスト（現在329件）
 python -m src.pipeline scout --sample      # 探索（APIキー不要）
 python -m src.pipeline run --sample        # 制作
 python -m src.pipeline report --days 7     # 週次レポート + 台帳

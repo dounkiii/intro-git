@@ -56,12 +56,22 @@ from .note_body import to_note_html
 logger = logging.getLogger(__name__)
 
 # 必要な Secret 名。値ではなく名前だけをオーナーに伝える。
-SESSION_ENV = "NOTE_SESSION_V5"      # Cookie `_note_session_v5` の値（必須）
-XSRF_ENV = "NOTE_XSRF_TOKEN"         # 任意。送れる環境では送る
+#
+# **2026-08-31 の実測でここを直した。** 当初は `_note_session_v5` だけを送って
+# 403 になり、原因を CSRF トークン（`XSRF-TOKEN` Cookie）だと考えた。しかし
+# オーナーのブラウザを確認すると **note.com に `XSRF-TOKEN` Cookie は存在しない**。
+# 実際にあるのは6つで、うち認証に効くのは `note_gql_auth_token`（JWT）だった。
+# **推測した対策より、実際の Cookie 一覧が勝つ。**
+SESSION_ENV = "NOTE_SESSION_V5"          # Cookie `_note_session_v5`（必須）
+GQL_ENV = "NOTE_GQL_AUTH_TOKEN"          # Cookie `note_gql_auth_token`（必須）
+XSRF_ENV = "NOTE_XSRF_TOKEN"             # 任意。ヘッダにだけ載せる
+# 上の2つで足りなかったときの逃げ道。`k=v; k=v` の生の形で渡す。
+# 仕様が読めない相手なので、Cookie を1つ増やすたびにコードを直す形にしない。
+EXTRA_ENV = "NOTE_EXTRA_COOKIES"
 
 API = "https://note.com/api/v1/text_notes"
-COOKIE_NAME = "_note_session_v5"
-XSRF_COOKIE = "XSRF-TOKEN"
+SESSION_COOKIE = "_note_session_v5"
+GQL_COOKIE = "note_gql_auth_token"
 
 # 作成した note の id を覚えておく場所。
 # **毎晩の実行で同じ記事の下書きを作り直さないため。** 持たないと、承認済みの
@@ -104,7 +114,9 @@ class NotePublisher:
         self.config = config or Config.load()
         pub = self.config.section("publishing")
         self.session_cookie = os.getenv(SESSION_ENV, "").strip()
+        self.gql_token = os.getenv(GQL_ENV, "").strip()
         self.xsrf = os.getenv(XSRF_ENV, "").strip()
+        self.extra_cookies = os.getenv(EXTRA_ENV, "").strip()
         self.draft = bool(pub.get("note_draft", True))
         self.timeout = int(pub.get("note_timeout", 30))
         self.hashtags: list[str] = pub.get("hashtags") or []
@@ -113,7 +125,9 @@ class NotePublisher:
     # ------------------------------------------------------------------
     def missing(self) -> list[str]:
         """未設定の Secret 名を返す。値は扱わない。"""
-        return [] if self.session_cookie else [SESSION_ENV]
+        return [name for name, value in ((SESSION_ENV, self.session_cookie),
+                                        (GQL_ENV, self.gql_token))
+                if not value]
 
     @property
     def available(self) -> bool:
@@ -141,16 +155,22 @@ class NotePublisher:
         return headers
 
     def _cookies(self) -> dict[str, str]:
-        """Cookie。**XSRF は Cookie 側にも入れる。**
+        """Cookie。**セッションだけでは 403 になる（実測）。**
 
-        note は double-submit cookie 方式で、Cookie とヘッダの両方に同じ
-        トークンが必要。ヘッダだけ送ると 403 になる（2026-08-31 に実測。
-        セッション Cookie だけで叩いて 403 が返った）。Cookie 側は
-        ブラウザと同じく**生の（デコードしない）値**を入れる。
+        ブラウザが note.com に持っている Cookie は6つで、認証に効くのは
+        `_note_session_v5` と `note_gql_auth_token`（JWT）。前者だけ送って
+        403 が返ったので、両方送る。
+
+        残り4つ（`_vid_v1` / `_vid_v2` / `fp` / `note_web_visitor_id`）は
+        計測・フィングープリント用に見えるので送らない。それでも通らない
+        場合に備えて `NOTE_EXTRA_COOKIES` で足せるようにしてある。
         """
-        cookies = {COOKIE_NAME: self.session_cookie}
-        if self.xsrf:
-            cookies[XSRF_COOKIE] = self.xsrf
+        cookies = {SESSION_COOKIE: self.session_cookie,
+                   GQL_COOKIE: self.gql_token}
+        for pair in self.extra_cookies.split(";"):
+            name, _, value = pair.partition("=")
+            if name.strip() and value.strip():
+                cookies[name.strip()] = value.strip()
         return cookies
 
     def _request(self, method: str, url: str, payload: dict,
@@ -170,7 +190,7 @@ class NotePublisher:
                 cookies=self._cookies(), timeout=self.timeout)
             resp.raise_for_status()
         except requests.RequestException as exc:
-            return _error(exc, step, has_xsrf=bool(self.xsrf))
+            return _error(exc, step)
         try:
             body = resp.json()
         except ValueError:
@@ -303,8 +323,7 @@ def _public_url(data: dict, note: dict) -> str:
     return ""
 
 
-def _error(exc: requests.RequestException, step: str = "",
-           has_xsrf: bool = True) -> dict:
+def _error(exc: requests.RequestException, step: str = "") -> dict:
     """失敗を dict にする。**認証情報を含めない。**
 
     requests の例外は url を持つ。ここではステータスと例外の種類だけを残す。
@@ -312,16 +331,11 @@ def _error(exc: requests.RequestException, step: str = "",
     """
     status = getattr(exc.response, "status_code", 0)
     where = f"（{step}）" if step else ""
-    if status == 403 and not has_xsrf:
-        # 実測: セッション Cookie だけで叩くと 403。note は Cookie とヘッダの
-        # 両方に CSRF トークンを要求する（double-submit cookie）。
-        logger.error("note が 403 を返しました%s。%s が未設定です。"
-                     "note の Cookie `XSRF-TOKEN` の値を登録してください。",
-                     where, XSRF_ENV)
-    elif status in (401, 403):
+    if status in (401, 403):
         logger.error("note の認証に失敗しました（%s）%s。%s と %s を"
-                     "取り直してください。note でログインし直すと値が変わります。",
-                     status, where, SESSION_ENV, XSRF_ENV)
+                     "取り直してください。note でログインし直すと値が変わります。"
+                     "それでも通らない場合は %s に残りの Cookie を足してください。",
+                     status, where, SESSION_ENV, GQL_ENV, EXTRA_ENV)
     elif status == 0:
         logger.error("note に接続できませんでした%s: %s",
                      where, type(exc).__name__)

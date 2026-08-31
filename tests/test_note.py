@@ -16,7 +16,8 @@ import requests
 
 from src.config import Config
 from src.models import Article
-from src.publishers.note import (API, COOKIE_NAME, SESSION_ENV, XSRF_ENV,
+from src.publishers.note import (API, EXTRA_ENV, GQL_COOKIE, GQL_ENV,
+                                 SESSION_COOKIE, SESSION_ENV, XSRF_ENV,
                                  NoteIdStore, NotePublisher)
 
 
@@ -30,7 +31,9 @@ def _article(**kw) -> Article:
 @pytest.fixture
 def creds(monkeypatch):
     monkeypatch.setenv(SESSION_ENV, "SECRET_SESSION_VALUE")
+    monkeypatch.setenv(GQL_ENV, "SECRET_GQL_TOKEN")
     monkeypatch.delenv(XSRF_ENV, raising=False)
+    monkeypatch.delenv(EXTRA_ENV, raising=False)
 
 
 @pytest.fixture
@@ -86,12 +89,24 @@ def net(monkeypatch):
 # --- Secret ----------------------------------------------------------------
 
 def test_Secretが欠けていたら投稿しない(monkeypatch, store):
-    monkeypatch.delenv(SESSION_ENV, raising=False)
+    for name in (SESSION_ENV, GQL_ENV):
+        monkeypatch.delenv(name, raising=False)
 
     result = NotePublisher(store=store).publish(_article())
 
     assert result["skipped"] == "secrets_missing"
-    assert result["missing"] == [SESSION_ENV]
+    assert set(result["missing"]) == {SESSION_ENV, GQL_ENV}
+
+
+def test_認証トークンだけ欠けていても止まる(monkeypatch, store):
+    """`_note_session_v5` だけでは 403 になる（2026-08-31 実測）。
+    手前で止めて、足りない Secret 名を出す。"""
+    monkeypatch.setenv(SESSION_ENV, "SECRET_SESSION_VALUE")
+    monkeypatch.delenv(GQL_ENV, raising=False)
+
+    result = NotePublisher(store=store).publish(_article())
+
+    assert result["missing"] == [GQL_ENV]
 
 
 def test_XSRFは無くても投稿できる(creds, net, store):
@@ -121,7 +136,8 @@ def test_新規作成のリクエスト(creds, net, store):
     assert net.calls[0]["method"] == "POST"
     assert net.calls[0]["url"] == API
     assert net.calls[0]["json"] == {"template_key": None}
-    assert call["cookies"] == {COOKIE_NAME: "SECRET_SESSION_VALUE"}
+    assert call["cookies"] == {SESSION_COOKIE: "SECRET_SESSION_VALUE",
+                               GQL_COOKIE: "SECRET_GQL_TOKEN"}
 
 
 def test_下書き保存のpayloadが実測どおり(creds, net, store):
@@ -298,7 +314,7 @@ def test_投稿するワークフローにSecretが渡っている():
         encoding="utf-8")
     publish_step = text[text.index("publish --approved") - 2000:]
 
-    for name in (SESSION_ENV, XSRF_ENV):
+    for name in (SESSION_ENV, GQL_ENV, EXTRA_ENV):
         assert f"{name}: ${{{{ secrets.{name} }}}}" in text, name
         assert name in publish_step, f"{name} が publish ステップに渡っていない"
 
@@ -337,14 +353,18 @@ def test_公開先は独立に動く():
 # 2026-08-31: セッション Cookie だけで本番に投げて 403 が返った。note は
 # double-submit cookie 方式で、Cookie とヘッダの両方に CSRF トークンが必要。
 
-def test_XSRFはCookieにも入れる(creds, net, store, monkeypatch):
-    """ヘッダだけ送ると 403 になる（実測）。"""
+def test_XSRFのCookieは送らない(creds, net, store, monkeypatch):
+    """**note.com に `XSRF-TOKEN` Cookie は存在しない**（オーナーのブラウザで
+    確認）。存在しない Cookie を送ると、通らないときに原因の候補が増える。
+
+    403 の原因を CSRF だと推測して Cookie に入れたのが誤りだった。
+    実際の Cookie 一覧が推測に勝つ。"""
     monkeypatch.setenv(XSRF_ENV, "tok123")
 
     NotePublisher(store=store).publish(_article())
 
-    assert net.calls[0]["cookies"]["XSRF-TOKEN"] == "tok123"
-    assert net.calls[0]["cookies"][COOKIE_NAME] == "SECRET_SESSION_VALUE"
+    assert "XSRF-TOKEN" not in net.calls[0]["cookies"]
+    assert set(net.calls[0]["cookies"]) == {SESSION_COOKIE, GQL_COOKIE}
 
 
 def test_ヘッダのXSRFはURLデコードする(creds, net, store, monkeypatch):
@@ -356,11 +376,9 @@ def test_ヘッダのXSRFはURLデコードする(creds, net, store, monkeypatch
     call = net.calls[0]
 
     assert call["headers"]["X-XSRF-TOKEN"] == "abc=="
-    # Cookie 側はブラウザと同じく生の値
-    assert call["cookies"]["XSRF-TOKEN"] == "abc%3D%3D"
 
 
-def test_XSRF未設定の403はSecret名を案内する(creds, store, monkeypatch, caplog):
+def test_403は取り直すSecret名を案内する(creds, store, monkeypatch, caplog):
     """403 が出たとき何を登録すればいいか分からないと直せない。"""
     class Resp:
         status_code = 403
@@ -373,8 +391,9 @@ def test_XSRF未設定の403はSecret名を案内する(creds, store, monkeypatc
     with caplog.at_level("ERROR"):
         NotePublisher(store=store).publish(_article())
 
-    assert XSRF_ENV in caplog.text
-    assert "XSRF-TOKEN" in caplog.text
+    assert SESSION_ENV in caplog.text
+    assert GQL_ENV in caplog.text
+    assert EXTRA_ENV in caplog.text
 
 
 def test_どのリクエストで落ちたかログに出る(creds, store, monkeypatch, caplog):
@@ -393,3 +412,26 @@ def test_どのリクエストで落ちたかログに出る(creds, store, monke
 
     assert result["step"] == "新規作成"
     assert "新規作成" in caplog.text
+
+
+def test_足りないCookieを後から足せる(creds, net, store, monkeypatch):
+    """相手は非公式APIで、必要な Cookie が読み切れない。1つ増えるたびに
+    コードを直す形にすると、そのたびに往復が発生する。"""
+    monkeypatch.setenv(EXTRA_ENV, "fp=abc123; note_web_visitor_id=xyz")
+
+    NotePublisher(store=store).publish(_article())
+    cookies = net.calls[0]["cookies"]
+
+    assert cookies["fp"] == "abc123"
+    assert cookies["note_web_visitor_id"] == "xyz"
+    # 必須の2つは残っている
+    assert cookies[SESSION_COOKIE] and cookies[GQL_COOKIE]
+
+
+def test_壊れたextraCookieは無視する(creds, net, store, monkeypatch):
+    """コピペ由来の余分な `;` や空要素で落とさない。"""
+    monkeypatch.setenv(EXTRA_ENV, "; =; fp=ok ;;")
+
+    NotePublisher(store=store).publish(_article())
+
+    assert net.calls[0]["cookies"]["fp"] == "ok"
