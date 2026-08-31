@@ -153,3 +153,16 @@ def test_公開ワークフローが承認済みだけを出す():
     # 承認前の生成コマンドを Pages のワークフローから呼んでいないこと
     assert "pipeline run" not in text
     assert "publish --approved" not in text
+
+
+def test_配信ワークフローは承認済みだけを出す():
+    """手動起動できる配信経路を足したので、そこから pending が漏れないことを
+    確かめる。承認するのは人、配信を再実行するのは機械、という切り分け。"""
+    text = Path(".github/workflows/publish.yml").read_text(encoding="utf-8")
+
+    assert "publish --approved" in text
+    assert "REVIEW_REQUIRED: 'true'" in text, \
+        "REVIEW_REQUIRED が false だと pending も配信される"
+    # 承認そのものを機械が押す経路になっていないこと
+    assert "/approve" not in text
+    assert "pipeline command" not in text

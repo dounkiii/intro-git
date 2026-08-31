@@ -1,0 +1,78 @@
+# 承認済みの記事を各公開先に配信する（手動起動）。
+#
+# **なぜ approve-command と別にするのか。** これまで `publish --approved` は
+# 承認コメント（`/approve` など）を処理するワークフローの中でだけ走っていた。
+# つまり**人がコメントするまで、既に承認済みの記事も配信されない**。Secret を
+# 後から登録した場合や、配信が一度失敗した場合に、承認をやり直す以外の
+# 手段がなかった。
+#
+# **承認ゲートは侵していない。** ここが出すのは `status=approved` の記事だけ
+# （`REVIEW_REQUIRED=true` で pending は対象外）。承認するのは人、配信を
+# 再実行するのは機械、という切り分け。承認を代行するものではない。
+name: publish
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: pipeline-state
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - run: pip install -q -r requirements.txt
+
+      - name: 承認済みを投稿
+        env:
+          TIKTOK_ACCESS_TOKEN: ${{ secrets.TIKTOK_ACCESS_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          DRY_RUN: ${{ vars.DRY_RUN || 'true' }}
+          # pending を配信対象にしない。承認ゲートはここで効いている。
+          REVIEW_REQUIRED: 'true'
+          AFF_HUB_URL: ${{ secrets.AFF_HUB_URL }}
+          AFF_PRODUCT_URL: ${{ secrets.AFF_PRODUCT_URL }}
+          AFF_ACCOUNTING_SOFT: ${{ secrets.AFF_ACCOUNTING_SOFT }}
+          AFF_TAX_ADVISOR: ${{ secrets.AFF_TAX_ADVISOR }}
+          AFF_FURUSATO: ${{ secrets.AFF_FURUSATO }}
+          AFF_SECURITIES: ${{ secrets.AFF_SECURITIES }}
+          AFF_INSURANCE: ${{ secrets.AFF_INSURANCE }}
+          NOTE_SESSION_V5: ${{ secrets.NOTE_SESSION_V5 }}
+          NOTE_XSRF_TOKEN: ${{ secrets.NOTE_XSRF_TOKEN }}
+          HATENA_USER_ID: ${{ secrets.HATENA_USER_ID }}
+          HATENA_BLOG_ID: ${{ secrets.HATENA_BLOG_ID }}
+          HATENA_API_KEY: ${{ secrets.HATENA_API_KEY }}
+        run: |
+          set -o pipefail
+          python -m src.pipeline publish --approved 2>&1 | tee /tmp/publish.log
+
+      - name: 実行結果を記録して状態をコミット
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python -m src.pipeline oplog \
+            --workflow publish \
+            --status '${{ job.status }}' \
+            --log /tmp/publish.log \
+            --run-url '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add -A data/
+          git diff --cached --quiet || {
+            git commit -m "chore: 配信結果を反映"
+            git pull --rebase --autostash origin "${{ github.ref_name }}"
+            git push
+          }
