@@ -131,6 +131,12 @@ class NotePublisher:
         self.draft = bool(pub.get("note_draft", True))
         self.timeout = int(pub.get("note_timeout", 30))
         self.hashtags: list[str] = pub.get("hashtags") or []
+        # **既定でタグを送らない。** 2026-08-31 の実測で、公開時に
+        # `[{"name": "税金"}]` の形を送ると HTTP 400 `hashtags is invalid` が
+        # 返った。正しい形が分からないまま当てにいくと、そのたびにオーナーの
+        # 本番アカウントに向けて試すことになる。タグは公開の必須項目ではない
+        # ので、まず記事を出す方を採る。形が実測できたら true にする。
+        self.send_hashtags = bool(pub.get("note_hashtags", False))
         self.store = store or NoteIdStore()
 
     # ------------------------------------------------------------------
@@ -245,6 +251,16 @@ class NotePublisher:
             step="下書き保存",
         )
 
+    def _hashtags(self) -> list[dict]:
+        """公開時に送るタグ。既定は空。
+
+        `[{"name": "税金"}]` は note に拒否された（HTTP 400
+        `hashtags is invalid`、2026-08-31 実測）。正しい形が取れるまで送らない。
+        """
+        if not self.send_hashtags:
+            return []
+        return [{"name": t.lstrip("#")} for t in self.hashtags]
+
     def publish_note(self, note: dict, title: str, body_html: str,
                      body_length: int) -> dict:
         """下書きを公開する。無料記事なので price は 0。
@@ -267,7 +283,7 @@ class NotePublisher:
                 "circle_permissions": [],
                 "author_ids": [],
                 "exclude_from_creator_top": False,
-                "hashtags": [{"name": t.lstrip("#")} for t in self.hashtags],
+                "hashtags": self._hashtags(),
             },
             step="公開",
         )

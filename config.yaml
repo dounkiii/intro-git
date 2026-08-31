@@ -196,6 +196,10 @@ publishing:
   # 2026-08-31: 下書き2本をオーナーが note の画面で確認し、書式が崩れて
   # いなかったので false にした。以後は /approve だけで本公開される。
   note_draft: false
+  # 公開時にハッシュタグを送るか。既定は false。
+  # `[{name: 税金}]` の形は note に 400 `hashtags is invalid` で
+  # 拒否された（2026-08-31 実測）。正しい形が取れたら true にする。
+  note_hashtags: false
   note_timeout: 30
   # 投稿時のプライバシー。未審査アプリは SELF_ONLY のみ許可される。
   privacy_level: 'SELF_ONLY'   # SELF_ONLY | MUTUAL_FOLLOW_FRIENDS | PUBLIC_TO_EVERYONE

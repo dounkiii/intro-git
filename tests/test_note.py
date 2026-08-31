@@ -215,9 +215,25 @@ def test_設定で公開に切り替えられる(creds, net, store):
     assert call["json"]["free_body"].startswith("<p name=")
 
 
-def test_公開時のハッシュタグは名前だけの形にする(creds, net, store):
+def test_既定ではハッシュタグを送らない(creds, net, store):
+    """`[{"name": "税金"}]` は note に拒否された（HTTP 400
+    `hashtags is invalid`、2026-08-31 実測）。正しい形が分からないまま
+    当てにいくと、そのたびに本番アカウントで試すことになる。
+    タグは公開の必須項目ではないので、まず記事を出す方を採る。"""
     config = Config.load()
     config.section("publishing")["note_draft"] = False
+    config.section("publishing")["hashtags"] = ["#税金", "ふるさと納税"]
+
+    NotePublisher(config, store=store).publish(_article())
+
+    assert net.call(f"{API}/177206277")["json"]["hashtags"] == []
+
+
+def test_形が分かったらタグを送れる(creds, net, store):
+    """実測できたら config 1行で有効にできること。"""
+    config = Config.load()
+    config.section("publishing")["note_draft"] = False
+    config.section("publishing")["note_hashtags"] = True
     config.section("publishing")["hashtags"] = ["#税金", "ふるさと納税"]
 
     NotePublisher(config, store=store).publish(_article())
