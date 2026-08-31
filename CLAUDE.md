@@ -108,10 +108,30 @@ DevTools でのキャプチャ（PC作業）が必要で止まった。はてな
 を付ける。広告表示（景表法のステマ規制）は**本文より前**に出す。免責（税理士法）は
 全ページのフッタに出す。
 
-note は捨てていない。`src/publishers/note.py` は下書き保存のリクエストだけ実測
-できていて、**新規作成と公開のリクエストが未取得**。`CREATE_NOTE` /
-`PUBLISH_NOTE` が空の間は `publish()` が `spec_missing` を返して何も送らない。
-**推測でエンドポイントを埋めない**（投稿先はオーナーの本番アカウント）。
+## note への投稿（実装済み・下書き既定）
+
+`src/publishers/note.py`。**根拠の強さを分けて書いてある。**
+
+- **実測**（オーナーのブラウザ、2026-08-28）: `POST /api/v1/text_notes/draft_save
+  ?id=<id>&is_temp_saved=true` の payload 5フィールド
+- **公開実装3件で一致**（2026-08-31 に GitHub 上で確認・互いに独立）:
+  新規作成 `POST /api/v1/text_notes` `{"template_key": null}` → id/key/slug、
+  公開 `PUT /api/v1/text_notes/{id}` `status="published"` `price=0`
+
+`body_length` は**実測に合わせて本文の文字数**（タグを除く）。公開実装2件は
+`len(body_html)` だったが、note のエディタ自身が送っていたのは文字数。
+**推測より実測を採る。**
+
+**こちらで実行しての確認はできていない**（この環境から note.com は遮断）。
+だから既定は下書き（`publishing.note_draft`）。1本目をオーナーが note の画面で
+見て確認したら false にする。
+
+必要な Secret は `NOTE_SESSION_V5`（Cookie `_note_session_v5` の値）。
+`NOTE_XSRF_TOKEN` は任意（公開実装3件のうち1件は送っていない）。**ログインし直すと
+値が変わる**ので、401/403 で止まったら差し替え。これが非公式APIの代償。
+
+`NoteIdStore`（`data/publish/note_ids.json`）で記事IDと note の id を対応づける。
+**持たないと毎晩の実行で同じ記事の下書きが1件ずつ増える。**
 
 ## 参考: はてなブログ（未使用）
 
@@ -214,7 +234,7 @@ Actions のログに頼らずリポジトリの中に記録を残す必要があ
 ## 開発コマンド
 
 ```bash
-pytest -q                                  # テスト（現在293件）
+pytest -q                                  # テスト（現在318件）
 python -m src.pipeline scout --sample      # 探索（APIキー不要）
 python -m src.pipeline run --sample        # 制作
 python -m src.pipeline report --days 7     # 週次レポート + 台帳

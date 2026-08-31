@@ -3,128 +3,225 @@
 **なぜ非公式APIなのか。** note には記事投稿の公式 API が無い（2026年時点で
 公開予定も未定）。オーナーが note を指定したため、ログイン済みセッションで
 叩く経路を採る。公式APIではないので **note 側の内部仕様が変わると壊れる**。
-その前提で、壊れたときに何が起きたか分かる形にしてある。
 
-**認証情報の扱い。** 値はオーナーが GitHub Secrets に自分で登録し、こちらは
-名前しか知らない（`CLAUDE.md` の運用原則）。ログにも出さない。このリポジトリは
-public なので、値をファイルに書かない。
+## 仕様の根拠（どこまで裏付けがあるか）
 
-**実測できている仕様（2026-08-28、オーナーのブラウザで下書き保存したときの
-リクエスト）。**
+推測で本番アカウントに投げないために、根拠の強さを分けて書く。
 
-    POST https://note.com/api/v1/text_notes/draft_save?id=<id>&is_temp_saved=true
-    payload:
-      body: '<p name="{uuid}" id="{uuid}">テストです。</p>...'
-      body_length: 6
-      index: false
-      is_lead_form: false
-      name: "テスト"
+**実測（オーナーのブラウザで下書き保存したときのリクエスト、2026-08-28）**
 
-`?id=` があるので、**この手前に「記事を新規作成して id をもらう」リクエストが
-ある**。それと「公開する」リクエストは未取得。両方とも
-`_MISSING_ENDPOINTS` に挙げてあり、揃うまで `publish()` は投稿しない。
+    POST /api/v1/text_notes/draft_save?id=<id>&is_temp_saved=true
+    {body, body_length, index: false, is_lead_form: false, name}
 
-**推測で埋めない理由。** 投稿先はオーナーの本番の note アカウントで、失敗が
-下書きの汚れや誤公開として外に出る。エンドポイントを推測して当てにいくのは、
-検証できないコードを本番に向けて発火させることと同じ。
+**公開実装3件で一致（2026-08-31 に GitHub 上で確認）**
+
+    新規作成  POST /api/v1/text_notes           {"template_key": null}
+              → レスポンスから id / key / slug
+    公開      PUT  /api/v1/text_notes/{id}      status="published", price=0
+
+  - tpyhon/-juggler_predictor `scripts/weekly_report.py`（Python）
+  - i0switch/ThreadsOS `src/adapters/note-api/index.ts`（TypeScript）
+  - Mr-SuperInsane/NoteClient2 `NoteClient2/client.py`（Python）
+
+3件は互いに独立で、**実測できた draft_save の形が3件とも一致している**ため、
+残り2本も同じ資料から採って妥当と判断した。ただし**こちらで実行しての確認は
+できていない**（この実行環境から note.com は遮断されている）。だから
+**既定は下書き**にしてある。1本目をオーナーが note の画面で見て確認する。
+
+`body_length` は**実測値に合わせて本文の文字数**（タグを除く）にしている。
+公開実装2件は `len(body_html)` を送っていたが、note のエディタ自身が送って
+いたのは「テストです。」6文字に対して 6 だった。**推測より実測を採る。**
+
+## 認証情報の扱い
+
+値はオーナーが GitHub Secrets に自分で登録し、こちらは名前しか知らない
+（`CLAUDE.md` の運用原則）。ログにも出さない。このリポジトリは public なので、
+値をファイルに書かない。**ログインし直すと Cookie が変わる**ので、投稿が
+401/403 で止まったら差し替えが必要。これが非公式APIを使う代償。
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
+from pathlib import Path
 
 import requests
 
-from ..config import Config
+from ..config import DATA_DIR, Config
 from ..models import Article
 from .note_body import to_note_html
 
 logger = logging.getLogger(__name__)
 
 # 必要な Secret 名。値ではなく名前だけをオーナーに伝える。
-COOKIE_ENV = "NOTE_COOKIE"          # ログイン済みセッションの Cookie ヘッダ
-XSRF_ENV = "NOTE_XSRF_TOKEN"        # CSRF トークン
+SESSION_ENV = "NOTE_SESSION_V5"      # Cookie `_note_session_v5` の値（必須）
+XSRF_ENV = "NOTE_XSRF_TOKEN"         # 任意。送れる環境では送る
 
-API = "https://note.com/api"
+API = "https://note.com/api/v1/text_notes"
+COOKIE_NAME = "_note_session_v5"
 
-# 実測できたリクエスト。
-DRAFT_SAVE = f"{API}/v1/text_notes/draft_save"
+# 作成した note の id を覚えておく場所。
+# **毎晩の実行で同じ記事の下書きを作り直さないため。** 持たないと、承認済みの
+# 記事1本につき下書きが毎日1件増えていく。
+STATE_PATH = DATA_DIR / "publish" / "note_ids.json"
 
-# 未取得のリクエスト。埋まるまで投稿しない。
-# キャプチャが来たらここだけ直せばよい形にしてある。
-CREATE_NOTE = ""     # 記事を新規作成して id をもらう
-PUBLISH_NOTE = ""    # 下書きを公開する
 
-_MISSING_ENDPOINTS = {
-    "新規作成": "CREATE_NOTE",
-    "公開": "PUBLISH_NOTE",
-}
+class NoteIdStore:
+    """記事ID → note の id / key / slug の対応を覚える。"""
+
+    def __init__(self, path: Path = STATE_PATH):
+        self.path = path
+
+    def load(self) -> dict[str, dict]:
+        if not self.path.exists():
+            return {}
+        try:
+            return json.loads(self.path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            # 壊れていても投稿を止めない。作り直す（下書きが1件増えるだけ）。
+            logger.warning("note の ID 台帳が読めません: %s", self.path)
+            return {}
+
+    def get(self, item_id: str) -> dict | None:
+        return self.load().get(item_id)
+
+    def put(self, item_id: str, note: dict) -> None:
+        data = self.load()
+        data[item_id] = note
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 class NotePublisher:
-    """note の下書き保存・公開の薄いラッパー。"""
+    """note の新規作成・下書き保存・公開。"""
 
-    def __init__(self, config: Config | None = None):
+    def __init__(self, config: Config | None = None,
+                 store: NoteIdStore | None = None):
         self.config = config or Config.load()
         pub = self.config.section("publishing")
-        self.cookie = os.getenv(COOKIE_ENV, "").strip()
+        self.session_cookie = os.getenv(SESSION_ENV, "").strip()
         self.xsrf = os.getenv(XSRF_ENV, "").strip()
         self.draft = bool(pub.get("note_draft", True))
         self.timeout = int(pub.get("note_timeout", 30))
+        self.hashtags: list[str] = pub.get("hashtags") or []
+        self.store = store or NoteIdStore()
 
     # ------------------------------------------------------------------
     def missing(self) -> list[str]:
         """未設定の Secret 名を返す。値は扱わない。"""
-        return [name for name, value in ((COOKIE_ENV, self.cookie),
-                                        (XSRF_ENV, self.xsrf)) if not value]
-
-    def spec_gaps(self) -> list[str]:
-        """まだ分かっていないリクエストの名前を返す。"""
-        return [label for label, const in _MISSING_ENDPOINTS.items()
-                if not globals()[const]]
+        return [] if self.session_cookie else [SESSION_ENV]
 
     @property
     def available(self) -> bool:
-        """投稿できる状態か。Secret が揃い、仕様の穴が無いこと。"""
-        return not self.missing() and not self.spec_gaps()
+        return not self.missing()
 
     def _headers(self) -> dict[str, str]:
-        """認証ヘッダ。**中身をログに出さない。**"""
-        return {
-            "Cookie": self.cookie,
-            "X-XSRF-TOKEN": self.xsrf,
+        """リクエストヘッダ。**中身をログに出さない。**
+
+        `Origin` / `Referer` を editor.note.com にするのは、公開実装3件が
+        揃ってそうしていたため。note 側が参照元を見ている可能性がある。
+        """
+        headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+            "Origin": "https://editor.note.com",
+            "Referer": "https://editor.note.com/",
         }
+        if self.xsrf:
+            headers["X-XSRF-TOKEN"] = self.xsrf
+        return headers
 
-    # ------------------------------------------------------------------
-    def save_draft(self, note_id: str, title: str, body_html: str,
-                   body_length: int) -> dict:
-        """下書きを保存する。実測できているのはこのリクエストだけ。"""
+    def _cookies(self) -> dict[str, str]:
+        return {COOKIE_NAME: self.session_cookie}
+
+    def _request(self, method: str, url: str, payload: dict) -> dict:
+        """1回のリクエスト。例外を投げず dict を返す。
+
+        毎朝の cron が1回の障害で止まらないようにするため
+        （collectors / llm / hatena と同じ方針）。
+        """
         try:
-            resp = requests.post(
-                DRAFT_SAVE,
-                params={"id": note_id, "is_temp_saved": "true"},
-                json={
-                    "body": body_html,
-                    "body_length": body_length,
-                    "index": False,
-                    "is_lead_form": False,
-                    "name": title,
-                },
-                headers=self._headers(),
-                timeout=self.timeout,
-            )
+            resp = requests.request(
+                method, url, json=payload, headers=self._headers(),
+                cookies=self._cookies(), timeout=self.timeout)
             resp.raise_for_status()
         except requests.RequestException as exc:
             return _error(exc)
-        return {"status": resp.status_code, "id": note_id}
+        try:
+            body = resp.json()
+        except ValueError:
+            body = {}
+        return {"status": resp.status_code, "data": body.get("data", body)}
 
-    def publish(self, article: Article) -> dict:
+    # ------------------------------------------------------------------
+    def create_note(self) -> dict:
+        """空の記事を作って id / key / slug をもらう。
+
+        下書き保存のURLに `?id=` が必要なので、これが最初に来る。
+        """
+        result = self._request("POST", API, {"template_key": None})
+        if "error" in result:
+            return result
+        data = result.get("data") or {}
+        note_id = data.get("id")
+        if not note_id:
+            logger.error("note の新規作成でIDが返りませんでした。"
+                         "note 側の仕様が変わった可能性があります。")
+            return {"error": "no_id", "status": result.get("status", 0)}
+        return {"id": str(note_id), "key": data.get("key", ""),
+                "slug": data.get("slug", "")}
+
+    def save_draft(self, note_id: str, title: str, body_html: str,
+                   body_length: int) -> dict:
+        """下書きを保存する。**この形だけは実測で確認できている。**"""
+        return self._request(
+            "POST",
+            f"{API}/draft_save?id={note_id}&is_temp_saved=true",
+            {
+                "body": body_html,
+                "body_length": body_length,
+                "index": False,
+                "is_lead_form": False,
+                "name": title,
+            },
+        )
+
+    def publish_note(self, note: dict, title: str, body_html: str,
+                     body_length: int) -> dict:
+        """下書きを公開する。無料記事なので price は 0。
+
+        `free_body` に本文を入れるのは、有料記事の「無料で読める部分」の
+        フィールドを全文に使う形（公開実装3件が揃ってそうしている）。
+        """
+        return self._request(
+            "PUT",
+            f"{API}/{note['id']}",
+            {
+                "name": title,
+                "free_body": body_html,
+                "body_length": body_length,
+                "status": "published",
+                "price": 0,
+                "slug": note.get("slug") or note["id"],
+                "index": True,
+                "is_lead_form": False,
+                "circle_permissions": [],
+                "author_ids": [],
+                "exclude_from_creator_top": False,
+                "hashtags": [{"name": t.lstrip("#")} for t in self.hashtags],
+            },
+        )
+
+    # ------------------------------------------------------------------
+    def publish(self, article: Article, item_id: str = "") -> dict:
         """記事を note に出す。出せないときは理由付きの dict を返す。
 
-        例外を投げないのは、毎朝の cron が1回の障害で止まらないようにするため
-        （collectors / llm / hatena と同じ方針）。
+        既定は**下書き**（`publishing.note_draft`）。非公式APIで、こちらでは
+        実行して確かめられていないので、1本目はオーナーが note の画面で
+        書式を確認する。確認できたら config で false にすれば以後は公開される。
         """
         missing = self.missing()
         if missing:
@@ -132,31 +229,69 @@ class NotePublisher:
                            ", ".join(missing))
             return {"skipped": "secrets_missing", "missing": missing}
 
-        gaps = self.spec_gaps()
-        if gaps:
-            # 推測で叩かない。当てにいった結果が本番アカウントの下書きの汚れや
-            # 誤公開として外に出る。
-            logger.warning("note の仕様が未確定なので投稿しません。"
-                           "未取得のリクエスト: %s", "・".join(gaps))
-            return {"skipped": "spec_missing", "gaps": gaps}
-
+        title = article.title
         body_html, body_length = to_note_html(article.body_markdown)
-        return {"skipped": "not_implemented",
-                "body_length": body_length,
-                "note": "新規作成と公開のリクエストが埋まったらここを実装する"}
+
+        key = item_id or title
+        note = self.store.get(key)
+        if note is None:
+            note = self.create_note()
+            if "error" in note:
+                return note
+            # **作成できた時点で覚える。** ここで落ちると、次回また新しい
+            # 下書きが作られて増えていく。
+            self.store.put(key, note)
+            logger.info("note の下書きを作成しました（id=%s）", note["id"])
+
+        saved = self.save_draft(note["id"], title, body_html, body_length)
+        if "error" in saved:
+            return saved
+
+        if self.draft:
+            logger.info("note に下書き保存しました（id=%s）。"
+                        "内容を確認したら publishing.note_draft を false に。",
+                        note["id"])
+            return {"note_id": note["id"], "draft": True,
+                    "url": _draft_url(note), "body_length": body_length}
+
+        published = self.publish_note(note, title, body_html, body_length)
+        if "error" in published:
+            return published
+
+        logger.info("note に公開しました（id=%s）", note["id"])
+        return {"note_id": note["id"], "draft": False,
+                "url": _public_url(published.get("data") or {}, note),
+                "body_length": body_length}
+
+
+def _draft_url(note: dict) -> str:
+    """編集画面のURL。オーナーが下書きを確認するために出す。"""
+    return f"https://editor.note.com/notes/{note.get('key') or note['id']}/edit/"
+
+
+def _public_url(data: dict, note: dict) -> str:
+    """公開後のURL。レスポンスに無ければ空（投稿自体は成功している）。"""
+    key = data.get("key") or note.get("key")
+    user = data.get("user", {}).get("urlname") if isinstance(
+        data.get("user"), dict) else ""
+    if user and key:
+        return f"https://note.com/{user}/n/{key}"
+    return ""
 
 
 def _error(exc: requests.RequestException) -> dict:
     """失敗を dict にする。**認証情報を含めない。**
 
-    requests の例外は url を持ち、url にトークンが乗る API もある。ここでは
-    ステータスと種類だけを残す。
+    requests の例外は url を持つ。ここではステータスと例外の種類だけを残す。
     """
     status = getattr(exc.response, "status_code", 0)
     if status in (401, 403):
-        logger.error("note の認証に失敗しました（%s）。%s と %s を"
-                     "取り直してください。ログインし直すと変わります。",
-                     status, COOKIE_ENV, XSRF_ENV)
+        logger.error("note の認証に失敗しました（%s）。%s を取り直して"
+                     "ください。note でログインし直すと値が変わります。",
+                     status, SESSION_ENV)
+    elif status == 0:
+        logger.error("note に接続できませんでした: %s", type(exc).__name__)
     else:
-        logger.error("note への投稿に失敗しました: %s", type(exc).__name__)
+        logger.error("note への投稿に失敗しました（HTTP %s）。note 側の仕様が"
+                     "変わった可能性があります。", status)
     return {"error": type(exc).__name__, "status": status}

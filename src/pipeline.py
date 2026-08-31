@@ -30,6 +30,7 @@ from .processing.classifier import Classifier
 from .processing.safety import SafetyChecker
 from .processing.summarizer import Summarizer
 from .publishers.hatena import HatenaPublisher
+from .publishers.note import NotePublisher
 from .publishers.github_issue import (
     Command,
     GitHubIssueSurface,
@@ -60,6 +61,7 @@ class Pipeline:
         self.exclude_flagged = bool(approval.get("exclude_flagged_from_bulk", True))
         self.max_items_per_issue = int(approval.get("max_items_per_issue", 5))
         self.hatena = HatenaPublisher(self.config)
+        self.note = NotePublisher(self.config)
 
     # ------------------------------------------------------------------
     def run(self, limit: int | None = None, use_sample: bool | None = None,
@@ -265,14 +267,20 @@ class Pipeline:
 
                 article_path = ""
                 hatena: dict = {}
+                note: dict = {}
                 if item.article:
                     article = Article(**item.article)
                     article_path = str(self._write_article(item.id, article))
                     # 承認したらそのまま公開されるようにする。手でコピペしない。
+                    # 公開先は独立に動かす。片方の Secret が無くても、もう片方は出る。
+                    # item.id を渡すのは、毎晩の実行で同じ記事の下書きを
+                    # 作り直さないため（note.NoteIdStore）。
+                    note = self.note.publish(article, item_id=item.id)
                     hatena = self.hatena.publish(article)
 
                 results.append({"id": item.id, "tiktok": result,
-                                "article": article_path, "hatena": hatena})
+                                "article": article_path,
+                                "note": note, "hatena": hatena})
                 if not self.config.dry_run:
                     self.queue.set_status(item.id, "published")
                     self.revenue.log_post(

@@ -81,6 +81,8 @@ jobs:
           AFF_PRODUCT_URL: ${{ secrets.AFF_PRODUCT_URL }}
           # はてなブログへ自動投稿する（公式 AtomPub API）。3つ揃わなければ
           # 投稿せず、未設定の Secret 名をログに出すだけ。
+          NOTE_SESSION_V5: ${{ secrets.NOTE_SESSION_V5 }}
+          NOTE_XSRF_TOKEN: ${{ secrets.NOTE_XSRF_TOKEN }}
           HATENA_USER_ID: ${{ secrets.HATENA_USER_ID }}
           HATENA_BLOG_ID: ${{ secrets.HATENA_BLOG_ID }}
           HATENA_API_KEY: ${{ secrets.HATENA_API_KEY }}
