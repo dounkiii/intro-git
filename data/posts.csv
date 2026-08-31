@@ -1,3 +1,5 @@
 timestamp,item_id,category,channel,status,route,title
 2026-08-26T16:45:35+00:00,household-sample-h1,household,-,approved,リンク集約ページ (AFF_HUB_URL),ふるさと納税の上限額は年収だけじゃない！家族構成で変わる注意点
 2026-08-26T16:49:31+00:00,subsidy-sample-s1,subsidy,-,approved,リンク集約ページ (AFF_HUB_URL),小規模事業者向け補助金の次回公募が決定！変更点と注意点
+2026-08-31T16:44:55+00:00,social_insurance-sample-i1,social_insurance,-,approved,リンク集約ページ (AFF_HUB_URL),パート・バイトも社会保険拡大？今後の働き方のポイント
+2026-08-31T16:44:55+00:00,tax-sample-t1,tax,-,approved,リンク集約ページ (AFF_HUB_URL),来年度の税制改正案で手取りはどう変わる？所得控除の見直しを解説
