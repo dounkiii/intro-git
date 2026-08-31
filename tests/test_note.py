@@ -435,3 +435,69 @@ def test_壊れたextraCookieは無視する(creds, net, store, monkeypatch):
     NotePublisher(store=store).publish(_article())
 
     assert net.calls[0]["cookies"]["fp"] == "ok"
+
+
+# --- 403 が3回続いた末の実測 --------------------------------------------------
+
+def test_ブラウザのUserAgentを送る(creds, net, store):
+    """requests の既定（python-requests/2.x）だと 403 になる（実測）。
+    Cookie を2つとも正しく送っても通らなかった。"""
+    NotePublisher(store=store).publish(_article())
+    ua = net.calls[0]["headers"]["User-Agent"]
+
+    assert "Mozilla/5.0" in ua
+    assert "python-requests" not in ua
+
+
+def test_失敗時はレスポンスの中身をログに残す(creds, store, monkeypatch, caplog):
+    """403 が note の API から来たのか、その前段の防御から来たのかは
+    本文を見ないと区別できない。無いと毎回推測で次の手を決めることになる。"""
+    class Resp:
+        status_code = 403
+        text = '{"error":"forbidden","message":"だめです"}'
+
+        def raise_for_status(self):
+            raise requests.HTTPError("403", response=self)
+
+    monkeypatch.setattr(requests, "request", lambda *a, **k: Resp())
+
+    with caplog.at_level("ERROR"):
+        NotePublisher(store=store).publish(_article())
+
+    assert "forbidden" in caplog.text
+
+
+def test_レスポンスのログは切り詰める(creds, store, monkeypatch, caplog):
+    """HTML のエラーページが返ると、丸ごと出すとログが埋まる。"""
+    class Resp:
+        status_code = 403
+        text = "<html>" + ("x" * 5000) + "</html>"
+
+        def raise_for_status(self):
+            raise requests.HTTPError("403", response=self)
+
+    monkeypatch.setattr(requests, "request", lambda *a, **k: Resp())
+
+    with caplog.at_level("ERROR"):
+        NotePublisher(store=store).publish(_article())
+
+    for record in caplog.records:
+        assert len(record.getMessage()) < 400
+
+
+def test_レスポンスのログに認証情報を含めない(creds, store, monkeypatch, caplog):
+    """このリポジトリは public。Actions のログも public に見える。"""
+    class Resp:
+        status_code = 403
+        text = "forbidden"
+
+        def raise_for_status(self):
+            raise requests.HTTPError("403", response=self)
+
+    monkeypatch.setattr(requests, "request", lambda *a, **k: Resp())
+
+    with caplog.at_level(logging.DEBUG):
+        NotePublisher(store=store).publish(_article())
+
+    assert "SECRET_SESSION_VALUE" not in caplog.text
+    assert "SECRET_GQL_TOKEN" not in caplog.text

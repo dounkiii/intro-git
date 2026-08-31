@@ -73,6 +73,17 @@ API = "https://note.com/api/v1/text_notes"
 SESSION_COOKIE = "_note_session_v5"
 GQL_COOKIE = "note_gql_auth_token"
 
+# ブラウザの User-Agent。
+#
+# **これを送っていなかったせいで 403 が続いた（2026-08-31 実測）。** requests の
+# 既定は `python-requests/2.x` で、note（またはその前段の防御）はそれを弾く。
+# Cookie を2つとも正しく送っても通らなかった。参考にした公開実装は
+# 「User-Agent（標準ブラウザUA）」を必須として挙げていたのに、こちらが
+# 落としていた。**資料に書いてあるヘッダを省略しない。**
+USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+              "AppleWebKit/537.36 (KHTML, like Gecko) "
+              "Chrome/128.0.0.0 Safari/537.36")
+
 # 作成した note の id を覚えておく場所。
 # **毎晩の実行で同じ記事の下書きを作り直さないため。** 持たないと、承認済みの
 # 記事1本につき下書きが毎日1件増えていく。
@@ -146,6 +157,8 @@ class NotePublisher:
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
+            "User-Agent": USER_AGENT,
+            "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
             "X-Requested-With": "XMLHttpRequest",
             "Origin": "https://editor.note.com",
             "Referer": "https://editor.note.com/",
@@ -323,6 +336,19 @@ def _public_url(data: dict, note: dict) -> str:
     return ""
 
 
+def _body_snippet(resp) -> str:
+    """レスポンス本文の先頭だけを返す。
+
+    **原因の切り分けに必要。** 403 が note の API から来たのか、その前段の
+    防御（Cloudflare など）から来たのかは、本文を見ないと区別できない。
+    2026-08-31 は 403 が3回続き、毎回「次に何を疑うか」を推測で決めていた。
+
+    送った Cookie やヘッダは含めない（このリポジトリは public）。長さも切る。
+    """
+    text = getattr(resp, "text", "") or ""
+    return " ".join(text[:200].split())
+
+
 def _error(exc: requests.RequestException, step: str = "") -> dict:
     """失敗を dict にする。**認証情報を含めない。**
 
@@ -331,6 +357,9 @@ def _error(exc: requests.RequestException, step: str = "") -> dict:
     """
     status = getattr(exc.response, "status_code", 0)
     where = f"（{step}）" if step else ""
+    snippet = _body_snippet(exc.response) if exc.response is not None else ""
+    if snippet:
+        logger.error("note のレスポンス（先頭200文字）: %s", snippet)
     if status in (401, 403):
         logger.error("note の認証に失敗しました（%s）%s。%s と %s を"
                      "取り直してください。note でログインし直すと値が変わります。"
