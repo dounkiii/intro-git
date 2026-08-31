@@ -19,12 +19,9 @@ on:
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-# 公開の取り消しはできないので、途中で打ち切らない。
+# 権限はジョブごとに最小で持つ。build は実行結果を push するので contents: write が
+# 必要（read のままだと github-actions[bot] が 403 で弾かれ、記録ステップが落ちる。
+# 初回の実行で実際に起きた）。deploy は push しないので contents は要らない。
 concurrency:
   group: pages
   cancel-in-progress: false
@@ -32,6 +29,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v5
 
@@ -81,6 +80,9 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
