@@ -158,7 +158,11 @@ def test_公開ワークフローが承認済みだけを出す():
 def test_配信ワークフローは承認済みだけを出す():
     """手動起動できる配信経路を足したので、そこから pending が漏れないことを
     確かめる。承認するのは人、配信を再実行するのは機械、という切り分け。"""
-    text = Path(".github/workflows/publish.yml").read_text(encoding="utf-8")
+    raw = Path(".github/workflows/publish.yml").read_text(encoding="utf-8")
+    # コメント行は除く。説明文に書いた `/approve` を「実行している」と
+    # 誤判定しないため（test_layer_contract の _code_of と同じ理由）。
+    text = "\n".join(l for l in raw.splitlines()
+                     if not l.lstrip().startswith("#"))
 
     assert "publish --approved" in text
     assert "REVIEW_REQUIRED: 'true'" in text, \
