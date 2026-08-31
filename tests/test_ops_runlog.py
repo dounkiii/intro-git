@@ -286,3 +286,21 @@ def test_実データのガードは除外に理由を求める():
     assert EXEMPT, "除外が空なら理由の検証も要らないはずで、書き間違いの可能性"
     for name, reason in EXEMPT.items():
         assert reason.strip(), f"{name} の除外理由が空です"
+
+
+def test_公開の失敗が成功として記録されない():
+    """2026-08-31: pages の記録を build ジョブの job.status で書いていたため、
+    build 成功 / deploy 失敗の回が `pages: success` として記録され、
+    opreport が「異常なし」を出した。**公開できていないのに記録上は成功**という、
+    一番気づけない形。記録は deploy の結果も見てから行うこと。"""
+    text = (REPO / ".github/workflows/pages.yml").read_text(encoding="utf-8")
+
+    record_at = text.index("実行結果を記録")
+    job_header = text[:record_at]
+
+    # 記録は build と deploy の両方を needs に持つジョブで行う
+    assert "needs: [build, deploy]" in job_header
+    # deploy の結果を条件に使っている
+    assert "needs.deploy.result" in text
+    # build の job.status だけで記録していない
+    assert "--status '${{ job.status }}'" not in text

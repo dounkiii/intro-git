@@ -58,25 +58,12 @@ jobs:
         with:
           path: build/site
 
-      - name: 実行結果を記録
-        if: always()
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          python -m src.pipeline oplog \
-            --workflow pages \
-            --status '${{ job.status }}' \
-            --log /tmp/pages.log \
-            --run-url '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
-          git config user.name 'github-actions[bot]'
-          git config user.email 'github-actions[bot]@users.noreply.github.com'
-          git add -A data/ops/
-          git diff --cached --quiet || {
-            git commit -m "chore: pages の実行結果を記録 (${{ job.status }})"
-            git pull --rebase --autostash origin "${{ github.ref_name }}"
-            git push
-          }
-
+  # 記録は build と deploy の両方を見てから行う。
+  #
+  # **なぜ独立したジョブなのか。** 最初は build の中で job.status を記録して
+  # いたが、それだと build が成功して deploy が失敗した回が `pages: success`
+  # として記録され、opreport が「異常なし」を出した（初回に実際に起きた）。
+  # **公開できていないのに記録上は成功**という、一番気づけない形になる。
   deploy:
     needs: build
     runs-on: ubuntu-latest
@@ -89,3 +76,47 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  record:
+    needs: [build, deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - run: pip install -q -r requirements.txt
+
+      - name: 実行結果を記録
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUILD: ${{ needs.build.result }}
+          DEPLOY: ${{ needs.deploy.result }}
+        run: |
+          # どちらかでも success でなければ失敗として記録する。
+          if [ "$BUILD" = "success" ] && [ "$DEPLOY" = "success" ]; then
+            STATUS=success
+          else
+            STATUS=failure
+          fi
+          printf 'build=%s deploy=%s\n' "$BUILD" "$DEPLOY" > /tmp/pages.log
+          python -m src.pipeline oplog \
+            --workflow pages \
+            --status "$STATUS" \
+            --log /tmp/pages.log \
+            --run-url '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add -A data/ops/
+          git diff --cached --quiet || {
+            git commit -m "chore: pages の実行結果を記録 ($STATUS)"
+            git pull --rebase --autostash origin "${{ github.ref_name }}"
+            git push
+          }
