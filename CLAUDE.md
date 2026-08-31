@@ -126,9 +126,17 @@ DevTools でのキャプチャ（PC作業）が必要で止まった。はてな
 だから既定は下書き（`publishing.note_draft`）。1本目をオーナーが note の画面で
 見て確認したら false にする。
 
-必要な Secret は `NOTE_SESSION_V5`（Cookie `_note_session_v5` の値）。
-`NOTE_XSRF_TOKEN` は任意（公開実装3件のうち1件は送っていない）。**ログインし直すと
-値が変わる**ので、401/403 で止まったら差し替え。これが非公式APIの代償。
+必要な Secret は2つとも**必須**。`NOTE_SESSION_V5`（Cookie
+`_note_session_v5` の値）と `NOTE_XSRF_TOKEN`（Cookie `XSRF-TOKEN` の値）。
+
+**2026-08-31 に実測**: セッション Cookie だけで本番に投げると **403**。note は
+double-submit cookie 方式で、**Cookie とヘッダの両方**に CSRF トークンが必要。
+ヘッダ側は URL デコードした値、Cookie 側は生の値を入れる（ブラウザ上の JS と
+同じ）。「公開実装1件は XSRF を送っていない」は当てにならなかった。
+
+**ログインし直すと値が変わる**ので、401/403 で止まったら差し替え。
+これが非公式APIの代償。エラーログには**どのリクエストで落ちたか**
+（新規作成 / 下書き保存 / 公開）が出る。
 
 `NoteIdStore`（`data/publish/note_ids.json`）で記事IDと note の id を対応づける。
 **持たないと毎晩の実行で同じ記事の下書きが1件ずつ増える。**
@@ -234,7 +242,7 @@ Actions のログに頼らずリポジトリの中に記録を残す必要があ
 ## 開発コマンド
 
 ```bash
-pytest -q                                  # テスト（現在318件）
+pytest -q                                  # テスト（現在326件）
 python -m src.pipeline scout --sample      # 探索（APIキー不要）
 python -m src.pipeline run --sample        # 制作
 python -m src.pipeline report --days 7     # 週次レポート + 台帳

@@ -44,6 +44,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import urllib.parse
 from pathlib import Path
 
 import requests
@@ -60,6 +61,7 @@ XSRF_ENV = "NOTE_XSRF_TOKEN"         # 任意。送れる環境では送る
 
 API = "https://note.com/api/v1/text_notes"
 COOKIE_NAME = "_note_session_v5"
+XSRF_COOKIE = "XSRF-TOKEN"
 
 # 作成した note の id を覚えておく場所。
 # **毎晩の実行で同じ記事の下書きを作り直さないため。** 持たないと、承認済みの
@@ -122,6 +124,10 @@ class NotePublisher:
 
         `Origin` / `Referer` を editor.note.com にするのは、公開実装3件が
         揃ってそうしていたため。note 側が参照元を見ている可能性がある。
+
+        `X-XSRF-TOKEN` には **URL デコードした値**を入れる。Cookie に入っている
+        値は percent-encoded（`=` が `%3D` など）で、ブラウザ上の JS は Cookie を
+        読んでデコードしてからヘッダに載せる。生のまま送ると照合に失敗する。
         """
         headers = {
             "Content-Type": "application/json",
@@ -131,17 +137,32 @@ class NotePublisher:
             "Referer": "https://editor.note.com/",
         }
         if self.xsrf:
-            headers["X-XSRF-TOKEN"] = self.xsrf
+            headers["X-XSRF-TOKEN"] = urllib.parse.unquote(self.xsrf)
         return headers
 
     def _cookies(self) -> dict[str, str]:
-        return {COOKIE_NAME: self.session_cookie}
+        """Cookie。**XSRF は Cookie 側にも入れる。**
 
-    def _request(self, method: str, url: str, payload: dict) -> dict:
+        note は double-submit cookie 方式で、Cookie とヘッダの両方に同じ
+        トークンが必要。ヘッダだけ送ると 403 になる（2026-08-31 に実測。
+        セッション Cookie だけで叩いて 403 が返った）。Cookie 側は
+        ブラウザと同じく**生の（デコードしない）値**を入れる。
+        """
+        cookies = {COOKIE_NAME: self.session_cookie}
+        if self.xsrf:
+            cookies[XSRF_COOKIE] = self.xsrf
+        return cookies
+
+    def _request(self, method: str, url: str, payload: dict,
+                 step: str = "") -> dict:
         """1回のリクエスト。例外を投げず dict を返す。
 
         毎朝の cron が1回の障害で止まらないようにするため
         （collectors / llm / hatena と同じ方針）。
+
+        `step` を渡すのは、**どのリクエストで落ちたかログから分かるように**
+        するため。最初の実装では 403 が出ても新規作成・下書き保存・公開の
+        どれで落ちたのか判別できなかった。
         """
         try:
             resp = requests.request(
@@ -149,7 +170,7 @@ class NotePublisher:
                 cookies=self._cookies(), timeout=self.timeout)
             resp.raise_for_status()
         except requests.RequestException as exc:
-            return _error(exc)
+            return _error(exc, step, has_xsrf=bool(self.xsrf))
         try:
             body = resp.json()
         except ValueError:
@@ -162,7 +183,8 @@ class NotePublisher:
 
         下書き保存のURLに `?id=` が必要なので、これが最初に来る。
         """
-        result = self._request("POST", API, {"template_key": None})
+        result = self._request("POST", API, {"template_key": None},
+                               step="新規作成")
         if "error" in result:
             return result
         data = result.get("data") or {}
@@ -187,6 +209,7 @@ class NotePublisher:
                 "is_lead_form": False,
                 "name": title,
             },
+            step="下書き保存",
         )
 
     def publish_note(self, note: dict, title: str, body_html: str,
@@ -213,6 +236,7 @@ class NotePublisher:
                 "exclude_from_creator_top": False,
                 "hashtags": [{"name": t.lstrip("#")} for t in self.hashtags],
             },
+            step="公開",
         )
 
     # ------------------------------------------------------------------
@@ -279,19 +303,29 @@ def _public_url(data: dict, note: dict) -> str:
     return ""
 
 
-def _error(exc: requests.RequestException) -> dict:
+def _error(exc: requests.RequestException, step: str = "",
+           has_xsrf: bool = True) -> dict:
     """失敗を dict にする。**認証情報を含めない。**
 
     requests の例外は url を持つ。ここではステータスと例外の種類だけを残す。
+    `step` を出すのは、どのリクエストで落ちたかが分からないと直せないため。
     """
     status = getattr(exc.response, "status_code", 0)
-    if status in (401, 403):
-        logger.error("note の認証に失敗しました（%s）。%s を取り直して"
-                     "ください。note でログインし直すと値が変わります。",
-                     status, SESSION_ENV)
+    where = f"（{step}）" if step else ""
+    if status == 403 and not has_xsrf:
+        # 実測: セッション Cookie だけで叩くと 403。note は Cookie とヘッダの
+        # 両方に CSRF トークンを要求する（double-submit cookie）。
+        logger.error("note が 403 を返しました%s。%s が未設定です。"
+                     "note の Cookie `XSRF-TOKEN` の値を登録してください。",
+                     where, XSRF_ENV)
+    elif status in (401, 403):
+        logger.error("note の認証に失敗しました（%s）%s。%s と %s を"
+                     "取り直してください。note でログインし直すと値が変わります。",
+                     status, where, SESSION_ENV, XSRF_ENV)
     elif status == 0:
-        logger.error("note に接続できませんでした: %s", type(exc).__name__)
+        logger.error("note に接続できませんでした%s: %s",
+                     where, type(exc).__name__)
     else:
-        logger.error("note への投稿に失敗しました（HTTP %s）。note 側の仕様が"
-                     "変わった可能性があります。", status)
-    return {"error": type(exc).__name__, "status": status}
+        logger.error("note への投稿に失敗しました（HTTP %s）%s。note 側の仕様が"
+                     "変わった可能性があります。", status, where)
+    return {"error": type(exc).__name__, "status": status, "step": step}

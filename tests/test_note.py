@@ -330,3 +330,66 @@ def test_公開先は独立に動く():
     # 片方の結果で他方を分岐させていない（同じ深さで並んでいる）
     between = src[note_at:hatena_at]
     assert "if " not in between, "note の結果で hatena の実行を分けています"
+
+
+# --- 403 の実測から入れた対策 ------------------------------------------------
+#
+# 2026-08-31: セッション Cookie だけで本番に投げて 403 が返った。note は
+# double-submit cookie 方式で、Cookie とヘッダの両方に CSRF トークンが必要。
+
+def test_XSRFはCookieにも入れる(creds, net, store, monkeypatch):
+    """ヘッダだけ送ると 403 になる（実測）。"""
+    monkeypatch.setenv(XSRF_ENV, "tok123")
+
+    NotePublisher(store=store).publish(_article())
+
+    assert net.calls[0]["cookies"]["XSRF-TOKEN"] == "tok123"
+    assert net.calls[0]["cookies"][COOKIE_NAME] == "SECRET_SESSION_VALUE"
+
+
+def test_ヘッダのXSRFはURLデコードする(creds, net, store, monkeypatch):
+    """Cookie の値は percent-encoded。ブラウザ上の JS は Cookie を読んで
+    デコードしてからヘッダに載せる。生のまま送ると照合に失敗する。"""
+    monkeypatch.setenv(XSRF_ENV, "abc%3D%3D")
+
+    NotePublisher(store=store).publish(_article())
+    call = net.calls[0]
+
+    assert call["headers"]["X-XSRF-TOKEN"] == "abc=="
+    # Cookie 側はブラウザと同じく生の値
+    assert call["cookies"]["XSRF-TOKEN"] == "abc%3D%3D"
+
+
+def test_XSRF未設定の403はSecret名を案内する(creds, store, monkeypatch, caplog):
+    """403 が出たとき何を登録すればいいか分からないと直せない。"""
+    class Resp:
+        status_code = 403
+
+        def raise_for_status(self):
+            raise requests.HTTPError("403", response=self)
+
+    monkeypatch.setattr(requests, "request", lambda *a, **k: Resp())
+
+    with caplog.at_level("ERROR"):
+        NotePublisher(store=store).publish(_article())
+
+    assert XSRF_ENV in caplog.text
+    assert "XSRF-TOKEN" in caplog.text
+
+
+def test_どのリクエストで落ちたかログに出る(creds, store, monkeypatch, caplog):
+    """最初の実装では 403 が出ても新規作成・下書き保存・公開のどれで落ちたか
+    判別できなかった。"""
+    class Resp:
+        status_code = 403
+
+        def raise_for_status(self):
+            raise requests.HTTPError("403", response=self)
+
+    monkeypatch.setattr(requests, "request", lambda *a, **k: Resp())
+
+    with caplog.at_level("ERROR"):
+        result = NotePublisher(store=store).publish(_article())
+
+    assert result["step"] == "新規作成"
+    assert "新規作成" in caplog.text
