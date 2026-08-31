@@ -192,8 +192,10 @@ publishing:
   hatena_categories: ['お金', '税金']
   hatena_timeout: 30
   # note（非公式API・ログインセッション）。オーナーが note を指定したため用意。
-  # 公式APIではないので note 側の仕様変更で壊れる。1本目を確認したら false に。
-  note_draft: true
+  # 公式APIではないので note 側の仕様変更で壊れる。
+  # 2026-08-31: 下書き2本をオーナーが note の画面で確認し、書式が崩れて
+  # いなかったので false にした。以後は /approve だけで本公開される。
+  note_draft: false
   note_timeout: 30
   # 投稿時のプライバシー。未審査アプリは SELF_ONLY のみ許可される。
   privacy_level: 'SELF_ONLY'   # SELF_ONLY | MUTUAL_FOLLOW_FRIENDS | PUBLIC_TO_EVERYONE
