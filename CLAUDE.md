@@ -92,7 +92,28 @@ Secrets が必要なときは **値ではなく Secret 名だけ**を指示す�
 
 このリポジトリは public。認証情報をファイルに書かない。
 
-## 公開先は note ではなく はてなブログ
+## 公開先は GitHub Pages（承認済みのみ）
+
+**外部サービスはどれもオーナーの作業なしには使えない。** note は公式APIが無く
+DevTools でのキャプチャ（PC作業）が必要で止まった。はてなは公式APIだが
+アカウント作成と Secret 3件の登録が要る。**GitHub Pages はこのリポジトリの中で
+完結する**ので、Pages を一度有効にすれば以後は push だけで公開される。認証情報も
+不要。実装は `src/publishers/site.py`、ワークフローは `.github/workflows/pages.yml`。
+
+**サイトに出るのは人が `/approve` を押したものだけ**（`site.PUBLISHABLE` は
+`approved` / `published` のみ）。`pending` を入れないことは
+`tests/test_site.py` が守る。公開先が変わっても承認ゲートは変えない。
+
+記事HTMLは必ずエスケープし、アフィリエイトリンクには `rel="nofollow sponsored"`
+を付ける。広告表示（景表法のステマ規制）は**本文より前**に出す。免責（税理士法）は
+全ページのフッタに出す。
+
+note は捨てていない。`src/publishers/note.py` は下書き保存のリクエストだけ実測
+できていて、**新規作成と公開のリクエストが未取得**。`CREATE_NOTE` /
+`PUBLISH_NOTE` が空の間は `publish()` が `spec_missing` を返して何も送らない。
+**推測でエンドポイントを埋めない**（投稿先はオーナーの本番アカウント）。
+
+## 参考: はてなブログ（未使用）
 
 **note には記事投稿の公式 API が無い**（2026年時点で公開予定も未定）。自動投稿
 事例はすべてログイン済みブラウザのセッション Cookie を使う非公式 API で、
@@ -193,12 +214,13 @@ Actions のログに頼らずリポジトリの中に記録を残す必要があ
 ## 開発コマンド
 
 ```bash
-pytest -q                                  # テスト（現在221件）
+pytest -q                                  # テスト（現在293件）
 python -m src.pipeline scout --sample      # 探索（APIキー不要）
 python -m src.pipeline run --sample        # 制作
 python -m src.pipeline report --days 7     # 週次レポート + 台帳
 python -m src.pipeline calibrate           # 予測 vs 実績（20件以降）
 python -m src.pipeline remind --days 7     # 未更新ニッチのリマインド
+python -m src.pipeline site                # 承認済み記事を静的サイトに書き出す
 python -m src.pipeline opreport            # 要確認だったスケジュール実行
 python -m src.pipeline critique --issue N  # 設計レビューを回す
 ```

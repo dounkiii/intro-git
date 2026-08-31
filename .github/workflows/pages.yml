@@ -1,0 +1,89 @@
+# 承認済みの記事を GitHub Pages に公開する。
+#
+# **なぜ Pages なのか。** note には公式の投稿APIが無く、キャプチャにオーナーの
+# PC作業が必要で止まっていた。はてなは公式APIだがアカウント作成と Secret 登録が
+# 要る。どの外部サービスもオーナーの作業なしには使えない。Pages はこの
+# リポジトリの中で完結するので、一度有効にすれば以後は push だけで公開される。
+#
+# **承認ゲートは維持している。** サイトに出るのは人が /approve を押したものだけ
+# （src/publishers/site.py の PUBLISHABLE）。pending は出さない。
+name: pages
+
+on:
+  push:
+    branches: [claude/mobile-automation-side-income-59tccj]
+    paths:
+      - 'data/review_queue/**'
+      - 'src/publishers/**'
+      - 'src/monetize/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 公開の取り消しはできないので、途中で打ち切らない。
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - run: pip install -q -r requirements.txt
+
+      - name: サイトを書き出す
+        env:
+          # 記事末尾の CTA と広告表示に使う。未設定なら CTA は出ない（no_route）。
+          AFF_HUB_URL: ${{ secrets.AFF_HUB_URL }}
+          AFF_PRODUCT_URL: ${{ secrets.AFF_PRODUCT_URL }}
+          AFF_ACCOUNTING_SOFT: ${{ secrets.AFF_ACCOUNTING_SOFT }}
+          AFF_TAX_ADVISOR: ${{ secrets.AFF_TAX_ADVISOR }}
+          AFF_FURUSATO: ${{ secrets.AFF_FURUSATO }}
+          AFF_SECURITIES: ${{ secrets.AFF_SECURITIES }}
+          AFF_INSURANCE: ${{ secrets.AFF_INSURANCE }}
+        run: |
+          set -o pipefail
+          python -m src.pipeline site --out build/site 2>&1 | tee /tmp/pages.log
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/site
+
+      - name: 実行結果を記録
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python -m src.pipeline oplog \
+            --workflow pages \
+            --status '${{ job.status }}' \
+            --log /tmp/pages.log \
+            --run-url '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add -A data/ops/
+          git diff --cached --quiet || {
+            git commit -m "chore: pages の実行結果を記録 (${{ job.status }})"
+            git pull --rebase --autostash origin "${{ github.ref_name }}"
+            git push
+          }
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

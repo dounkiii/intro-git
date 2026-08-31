@@ -479,6 +479,24 @@ def _cmd_oplog(args) -> None:
           f"anomalies={rec.anomalies or 'なし'}")
 
 
+def _cmd_site(args) -> None:
+    """承認済みの記事を静的サイトに書き出す。
+
+    公開されるのは人が /approve を押したものだけ（site.PUBLISHABLE）。
+    """
+    from pathlib import Path
+
+    from .publishers.site import SiteBuilder
+
+    result = SiteBuilder(Config.load()).build(Path(args.out))
+    print(f"記事 {result['articles']}件 を書き出しました → {args.out}")
+    for f in result["files"]:
+        print(f"  - {f}")
+    if result["articles"] == 0:
+        # 承認が無いだけなので失敗ではない。ただし気づけるように出す。
+        print("⚠️ 承認済みの記事がありません。/approve を押すと公開対象になります。")
+
+
 def _cmd_opreport(args) -> None:
     from .ops import RunLog
 
@@ -579,6 +597,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_op.add_argument("--run-url", default="")
     p_op.add_argument("--ts", default="", help="省略時は現在時刻（UTC）")
     p_op.set_defaults(func=_cmd_oplog)
+
+    p_site = sub.add_parser("site", help="承認済みの記事を静的サイトに書き出す")
+    p_site.add_argument("--out", default="build/site", help="出力先ディレクトリ")
+    p_site.set_defaults(func=_cmd_site)
 
     p_opr = sub.add_parser("opreport", help="要確認の実行を一覧する")
     p_opr.add_argument("--limit", type=int, default=10)

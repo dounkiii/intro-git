@@ -3,6 +3,8 @@ __pycache__/
 *.pyc
 .env
 .pytest_cache/
+# サイトの生成物。Actions が毎回組み直すのでコミットしない
+build/
 .DS_Store
 
 # --- 生成される重いメディアはコミットしない（投稿時に台本から再生成する） ---
