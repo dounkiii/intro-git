@@ -176,10 +176,25 @@ def test_本文はnoteのHTMLで送る(creds, net, store):
 
 # --- 下書きと公開 ----------------------------------------------------------
 
-def test_既定は下書きで公開まで行かない(creds, net, store):
-    """非公式APIで、こちらでは実行して確かめられていない。1本目は
-    オーナーが note の画面で書式を確認する。"""
-    result = NotePublisher(store=store).publish(_article())
+def test_コードの既定は下書き(creds, net, store):
+    """config に note_draft が無いときは下書きに倒す。
+
+    新しい外部連携が初回から公開すると、書式崩れに気づく前に世に出る。
+    **live の config を読まない。** 運用で公開に切り替えた途端にこのテストが
+    落ちると、「設定を変えたらテストが赤くなる」ノイズになる。
+    """
+    config = Config.load()
+    config.section("publishing").pop("note_draft", None)
+
+    assert NotePublisher(config, store=store).draft is True
+
+
+def test_下書きなら公開まで行かない(creds, net, store):
+    """下書き設定のときに PUT が飛ばないこと。"""
+    config = Config.load()
+    config.section("publishing")["note_draft"] = True
+
+    result = NotePublisher(config, store=store).publish(_article())
 
     assert result["draft"] is True
     assert not any(c["method"] == "PUT" for c in net.calls)
