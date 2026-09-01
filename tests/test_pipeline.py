@@ -75,6 +75,44 @@ def test_トークンがなければ本番指定でもサンプルに落ちる(m
     assert any(collected.values())        # サンプルで中身が返る
 
 
+def test_自動判定でサンプルに落ちた回はログに残る(monkeypatch, caplog):
+    """2026-09-01 に発覚。X_BEARER_TOKEN が未登録のまま毎晩 daily-generate が
+    走り、同じサンプル4件から記事を作り続けていた。この経路（use_sample=None）
+    だけ黙っていたので、status=success のログに痕跡がゼロだった。
+    `src/ops/runlog.py` の sample_input マーカーがこの文言を拾う。"""
+    import logging
+
+    from src.collectors.twitter import TwitterCollector
+    from src.config import Config
+
+    config = Config.load()
+    config.x_bearer_token = ""
+    collector = TwitterCollector(config)
+
+    with caplog.at_level(logging.WARNING, logger="src.collectors.twitter"):
+        collector.collect()                # 引数なし = 自動判定
+
+    assert any("サンプルデータで続行します" in r.message for r in caplog.records)
+
+
+def test_サンプルを明示した回は異常扱いにしない(monkeypatch, caplog):
+    """`--sample` は意図した実行。ここで警告を出すと毎回の手動確認が
+    要確認として積み上がり、マーカーが狼少年になる。"""
+    import logging
+
+    from src.collectors.twitter import TwitterCollector
+    from src.config import Config
+
+    config = Config.load()
+    config.x_bearer_token = ""
+    collector = TwitterCollector(config)
+
+    with caplog.at_level(logging.WARNING, logger="src.collectors.twitter"):
+        collector.collect(use_sample=True)
+
+    assert not any("サンプルデータで続行します" in r.message for r in caplog.records)
+
+
 # --- 2026-08-30 の duration_over ---------------------------------------------
 
 def test_台本プロンプトは尺を文字数で伝える():

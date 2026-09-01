@@ -19,6 +19,11 @@ logger = logging.getLogger(__name__)
 SEARCH_URL = "https://api.twitter.com/2/tweets/search/recent"
 SAMPLE_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "sample_tweets.json"
 
+# サンプルに落ちたことを示す文言。`src/ops/runlog.py` の sample_input マーカーが
+# この文字列を拾うので、変えるときは両方直すこと。
+SAMPLE_FALLBACK_MSG = ("X_BEARER_TOKEN が未設定です。サンプルデータで続行します"
+                       "（X API は呼びません）。")
+
 
 class TwitterCollector:
     def __init__(self, config: Config):
@@ -39,11 +44,15 @@ class TwitterCollector:
 
         if use_sample is None:
             use_sample = not self.token
+            if use_sample:
+                # 自動判定でサンプルに落ちた回。ここが黙っていたため、毎晩
+                # 同じサンプル4件から記事を作り続けても status=success の
+                # ログに痕跡が残らなかった（2026-09-01 に発覚）。
+                logger.warning(SAMPLE_FALLBACK_MSG)
         elif not use_sample and not self.token:
             # 明示的に本番指定されてもトークンが無ければ呼べない。ここで落とすと
             # 毎朝の cron が止まるので、警告してサンプルに落とす。
-            logger.warning("X_BEARER_TOKEN が未設定です。サンプルデータで続行します"
-                           "（X API は呼びません）。")
+            logger.warning(SAMPLE_FALLBACK_MSG)
             use_sample = True
 
         results: dict[str, list[Tweet]] = {}

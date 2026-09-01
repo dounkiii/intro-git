@@ -50,6 +50,8 @@ def test_失敗は異常マーカーが無くても要確認(tmp_path):
     ("template_fallback", "LLM の API キーが未設定のため、テンプレ生成で動作します"),
     ("duration_over", "合計尺が 115.0秒で max_duration_sec=90 を超えています"),
     ("traceback", 'Traceback (most recent call last):\n  File "x.py"'),
+    ("sample_input", "WARNING 有効な発掘元がありません。サンプルデータで実行します。"),
+    ("sample_input", "WARNING X_BEARER_TOKEN が未設定です。サンプルデータで続行します"),
 ])
 def test_過去に起きた異常をログから拾える(key, sample):
     """マーカーは実際に起きたバグから採っている。推測で増やすと誤検知になる。"""
@@ -304,3 +306,16 @@ def test_公開の失敗が成功として記録されない():
     assert "needs.deploy.result" in text
     # build の job.status だけで記録していない
     assert "--status '${{ job.status }}'" not in text
+
+
+def test_実データを読めていない回を拾える():
+    """2026-09-01: X_BEARER_TOKEN が未登録のまま毎晩動いており、探索も制作も
+    固定のサンプルから作られていた。status=success・anomalies=[] で、
+    リポジトリ上は正常に見えていた。**入力が偽物でも成功に見える**のが怖い。"""
+    keys, notes = scan("INFO 探索開始\n"
+                       "WARNING 有効な発掘元がありません。サンプルデータで実行します。"
+                       "（X_BEARER_TOKEN / XAI_API_KEY を設定してください）\n"
+                       "INFO 探索完了: 3件")
+
+    assert "sample_input" in keys
+    assert any("X_BEARER_TOKEN" in n for n in notes)

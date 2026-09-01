@@ -47,6 +47,13 @@ MARKERS: list[tuple[str, str, str]] = [
     # status=failure は記録できたが anomalies が空で、原因の手がかりが残らなかった。
     ("cli_error", r"^usage: pipeline|pipeline: error:",
      "コマンドの呼び方が壊れている。ワークフローの引数と行継続を確認"),
+    # 2026-09-01: X_BEARER_TOKEN / XAI_API_KEY が未登録のまま毎晩動いており、
+    # 探索も制作も固定のサンプル（候補2件・ツイート4件）から作られていた。
+    # status は success、anomalies も空で、リポジトリ上は正常に見えていた。
+    # 公開済みの記事4本はすべてサンプル由来。**実データを1件も読んでいない。**
+    # --sample を明示した手動実行では出さない（そちらは意図した実行なので）。
+    ("sample_input", r"サンプルデータで(実行|続行)します",
+     "実データを読めていない。X_BEARER_TOKEN / XAI_API_KEY の Secret を確認"),
 ]
 
 
