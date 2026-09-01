@@ -94,7 +94,7 @@ Issue に案件ごとにこういうブロックが並ぶ。
 
 | Secret | 説明 |
 |---|---|
-| `X_BEARER_TOKEN` | X API v2。未設定ならサンプルデータで動く |
+| `X_BEARER_TOKEN` | X API v2。**未設定だと探索も制作も固定のサンプルから作られる**（実データを1件も読まない）。取り方と、対話で X を読む X 公式 MCP の設定は [X_MCP.md](X_MCP.md) |
 | `TIKTOK_ACCESS_TOKEN` | TikTok Content Posting API。**アプリ審査が通るまでは `SELF_ONLY` のみ** |
 
 `GITHUB_TOKEN` は Actions が自動で用意するので登録不要。

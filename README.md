@@ -19,6 +19,7 @@
 📘 **戦略**: [docs/PLAYBOOK.md](docs/PLAYBOOK.md)（収益条件の実数・90日プラン・地雷リスト）
 🔎 **探索レイヤ設計**: [docs/RESEARCH_SYSTEM.md](docs/RESEARCH_SYSTEM.md)（評価軸・実測補正・データ構造）
 📱 **運用手順**: [docs/PHONE_OPS.md](docs/PHONE_OPS.md)（セットアップと毎朝のルーティン）
+🐦 **X を実データで読む**: [docs/X_MCP.md](docs/X_MCP.md)（X 公式 MCP の設定と、毎晩のパイプラインをサンプルから抜け出させる手順）
 
 ---
 
