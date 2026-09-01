@@ -18,6 +18,17 @@ on:
       - 'src/monetize/**'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
+  # 承認・配信のあとに必ず走らせる。
+  #
+  # **なぜ push トリガだけでは足りないのか。** GitHub は `GITHUB_TOKEN` で行われた
+  # push ではワークフローを起動しない（再帰実行を防ぐ仕様）。承認コマンドは
+  # github-actions[bot] として承認結果を push するので、`paths` に
+  # data/review_queue/** を入れていても pages は動かない。実際 2026-08-31 の
+  # /approve all で note には4本出たのに、**サイトは2本のまま**だった。
+  # workflow_run はこの制限を受けない。
+  workflow_run:
+    workflows: [approve-command, publish]
+    types: [completed]
 
 # 権限はジョブごとに最小で持つ。build は実行結果を push するので contents: write が
 # 必要（read のままだと github-actions[bot] が 403 で弾かれ、記録ステップが落ちる。

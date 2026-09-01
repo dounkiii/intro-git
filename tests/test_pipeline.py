@@ -30,11 +30,25 @@ def test_run_with_sample_data(tmp_path, monkeypatch):
     assert any(it.id in item_ids for it in pending)
 
 
-def test_publish_requires_approval_by_default():
+def test_publish_requires_approval_by_default(tmp_path, monkeypatch):
+    """承認していなければ pending は投稿対象にならない。
+
+    出力先を tmp_path に逃がすのは、`publish_approved()` が記事Markdownと
+    絵コンテを実際に書き出すから。2026-09-01 に承認済みが2本→4本に増えた
+    ところで、このテストが本番の data/articles/ を書き換え始めた
+    （conftest のガードが検知）。**承認が増えるとテストが本番を触る**という、
+    件数に依存して現れる形だった。
+    """
+    from src.publishers.review_queue import ReviewQueue
+
     os.environ["DRY_RUN"] = "true"
-    pipeline = Pipeline(Config.load())
-    # 承認していなければ pending は投稿対象にならない
-    results = pipeline.publish_approved()
+    monkeypatch.setattr("src.pipeline.OUTPUT_DIR", tmp_path / "output")
+    monkeypatch.setattr("src.pipeline.ARTICLE_DIR", tmp_path / "articles")
+    monkeypatch.setattr("src.pipeline.ReviewQueue",
+                        lambda *a, **k: ReviewQueue(tmp_path / "review"))
+
+    results = Pipeline(Config.load()).publish_approved()
+
     assert all(r["id"] for r in results) or results == []
 
 

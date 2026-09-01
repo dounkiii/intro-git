@@ -170,3 +170,26 @@ def test_配信ワークフローは承認済みだけを出す():
     # 承認そのものを機械が押す経路になっていないこと
     assert "/approve" not in text
     assert "pipeline command" not in text
+
+
+def test_承認のあとにサイトが更新される():
+    """GitHub は GITHUB_TOKEN による push でワークフローを起動しない（再帰実行を
+    防ぐ仕様）。承認コマンドは bot として push するので、paths に
+    data/review_queue/** を入れていても pages は動かない。
+
+    2026-08-31 の /approve all で実際に起きた: note には4本出たのに
+    **サイトは2本のまま**だった。承認したのに公開されない形は、
+    人が押した操作が黙って消えるのと同じ。
+    """
+    import yaml
+
+    doc = yaml.safe_load(
+        Path(".github/workflows/pages.yml").read_text(encoding="utf-8"))
+    # yaml は `on` を True と解釈する
+    triggers = doc.get("on") or doc.get(True)
+
+    assert "workflow_run" in triggers, \
+        "承認のあとにサイトを更新する経路がない"
+    watched = triggers["workflow_run"]["workflows"]
+    assert "approve-command" in watched
+    assert "publish" in watched
