@@ -153,3 +153,48 @@ python -m src.pipeline opreport
   **公式 README には記載がありませんでした。**（この環境から `docs.x.com` は
   遮断されており確認できていない）。使えるならローカルサーバは不要になりますが、
   その場合も allowlist で書き込みツールを絞れるかは未確認です
+
+---
+
+## 画像・動画を読ませる（`tools/tweet_read.py`）
+
+ツイートの本文は `cdn.syndication.twimg.com`（埋め込み用の公開エンドポイント）
+から読めます。**このホストだけは通ります。** ただしメディアは別ホストにあり、
+2026-09-01 時点で全滅です。
+
+| ホスト | 用途 | この環境から |
+|---|---|---|
+| `cdn.syndication.twimg.com` | ツイート本文・投稿者・いいね数 | **通る** |
+| `pbs.twimg.com` | 画像 | 403（CONNECT をゲートウェイが拒否） |
+| `video.twimg.com` | 動画 | 403 |
+| `x.com` | X Articles の本文、通常のページ | 403 |
+| `abs.twimg.com` / `ton.twimg.com` / `platform.twitter.com` | その他 | 403 |
+
+**これはコードで回避できません。** egress ポリシーはこのセッションの環境設定で
+決まっていて、403 は「組織のポリシーで拒否」という意味です
+（`/root/.ccr/README.md`「Do not retry or route around it」）。
+
+### 直し方は2つ
+
+1. **環境のネットワーク設定で上の3ホストを許可する**（`pbs.twimg.com` /
+   `video.twimg.com` / `x.com`）。claude.ai/code の環境設定から。
+   → https://code.claude.com/docs/en/claude-code-on-the-web
+2. **ファイルを直接チャットに添付する。** 設定変更なしで今日から使えます。
+
+### 使い方
+
+```bash
+python tools/tweet_read.py https://x.com/user/status/123456789   # URL でも ID でも
+python tools/tweet_read.py ./screenshot.png                      # 手元の画像
+python tools/tweet_read.py ./demo.mp4 --frames 12                # 動画
+```
+
+出力は `data/inbox/<id>/` に落ち、最後に「Read するファイル一覧」が出ます。
+
+**動画はコマに割ってから読みます。** 動画そのものは見られないので、
+等間隔の静止画にして1枚ずつ読む形にしてあります（既定8コマ、`--frames` で変更）。
+ffmpeg は `pip install imageio-ffmpeg` で入ります。**音声は読めません。**
+ナレーションが本体の動画は、その部分が落ちることを承知で使ってください。
+
+`data/inbox/` は `.gitignore` 済み。他人の著作物を public リポジトリに
+コミットしないため。

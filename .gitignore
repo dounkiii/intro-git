@@ -19,3 +19,6 @@ data/output/*.storyboard.json
 # （data/review_queue/*.json, data/articles/*.md, data/posts.csv, data/revenue.csv,
 #   data/scout/opportunities.jsonl, data/scout/ledger.jsonl,
 #   data/adopted_niches.yaml）
+
+# ツイート等から取り込んだメディア（著作物なので public リポジトリに入れない）
+data/inbox/
