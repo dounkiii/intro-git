@@ -487,6 +487,65 @@ def _cmd_oplog(args) -> None:
           f"anomalies={rec.anomalies or 'なし'}")
 
 
+def _cmd_draft(args) -> None:
+    """お題から記事を書いて、note の下書きに保存する。
+
+    **探索も動画も承認キューも通らない。** 「リサーチはいらない、記事だけ書いて
+    下書きにしたい」という用途のための最短経路。
+
+    公開はしない（`NotePublisher.save_as_draft` は PUT を持たない）。公開するか
+    どうかはオーナーが note の画面で決める。
+    """
+    import re as _re
+
+    from .processing.summarizer import Summarizer
+    from .publishers.note import NotePublisher
+
+    config = Config.load()
+
+    if args.file:
+        from pathlib import Path as _Path
+
+        text = _Path(args.file).read_text(encoding="utf-8")
+        # 先頭の `# 見出し` をタイトルとして取り出す
+        m = _re.match(r"\s*#\s+(.+)", text)
+        title = args.title or (m.group(1).strip() if m else _Path(args.file).stem)
+        body = text[m.end():].lstrip() if m else text
+        article = Article(topic_category=args.category, title=title,
+                          body_markdown=body, monetization_route="なし",
+                          generated_by="file")
+    else:
+        article = Summarizer(config).write_from_theme(args.theme, args.category)
+        if article is None:
+            print("⚠️ 記事を書けませんでした。LLM の API キーの Secret を確認してください。")
+            raise SystemExit(1)
+
+    print(f"タイトル: {article.title}")
+    print(f"本文: {len(article.body_markdown)}字（{article.generated_by}）")
+
+    if args.dry_run:
+        print("\n--- 本文（--dry-run なので note には送っていません）---\n")
+        print(article.body_markdown)
+        return
+
+    # 同じお題で流し直したときに下書きが増えないよう、お題をキーにする。
+    # 毎回新しい下書きが欲しいときは --new。
+    key = "" if args.new else f"draft:{args.theme or args.file}"
+    result = NotePublisher(config).save_as_draft(article, key=key)
+
+    if "skipped" in result:
+        print(f"⚠️ note に保存していません: {result['skipped']} "
+              f"{result.get('missing', '')}")
+        raise SystemExit(1)
+    if "error" in result:
+        print(f"⚠️ note への保存に失敗しました（{result.get('step', '')}）: "
+              f"HTTP {result.get('status')}")
+        raise SystemExit(1)
+
+    print(f"\n✅ note の下書きに保存しました")
+    print(f"   {result['url']}")
+
+
 def _cmd_site(args) -> None:
     """承認済みの記事を静的サイトに書き出す。
 
@@ -605,6 +664,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_op.add_argument("--run-url", default="")
     p_op.add_argument("--ts", default="", help="省略時は現在時刻（UTC）")
     p_op.set_defaults(func=_cmd_oplog)
+
+    p_draft = sub.add_parser(
+        "draft", help="お題から記事を書いて note の下書きに保存する（公開しない）")
+    p_draft.add_argument("--theme", default="", help="お題。例: ふるさと納税の上限")
+    p_draft.add_argument("--file", default="", help="既存の Markdown を下書きにする")
+    p_draft.add_argument("--title", default="", help="--file のときのタイトル上書き")
+    p_draft.add_argument("--category", default="tax",
+                         help="tax / household / subsidy / social_insurance など")
+    p_draft.add_argument("--new", action="store_true",
+                         help="同じお題でも新しい下書きを作る")
+    p_draft.add_argument("--dry-run", action="store_true",
+                         help="note に送らず本文を表示するだけ")
+    p_draft.set_defaults(func=_cmd_draft)
 
     p_site = sub.add_parser("site", help="承認済みの記事を静的サイトに書き出す")
     p_site.add_argument("--out", default="build/site", help="出力先ディレクトリ")

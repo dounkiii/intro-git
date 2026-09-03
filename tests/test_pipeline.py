@@ -141,3 +141,56 @@ def test_読み上げ速度の実測がログに出る(caplog):
         builder._fit_duration(prepared, narration_chars=200)
 
     assert "読み上げ速度の実測: 4.00字/秒" in caplog.text
+
+
+# --- お題から記事を書く（探索を通さない経路）---------------------------------
+
+def test_LLMが使えないときは空の記事を作らない():
+    """お題しか無い状態のテンプレ出力は中身が無い。黙って空の記事を note の
+    下書きに置くより、書けないと言う方がいい。"""
+    from src.config import Config
+    from src.processing.summarizer import Summarizer
+
+    s = Summarizer(Config.load())
+
+    class _Dead:
+        available = False
+        provider = "none"
+
+    s.llm = _Dead()
+
+    assert s.write_from_theme("ふるさと納税の上限") is None
+
+
+def test_お題から書いた記事に免責が入る(monkeypatch):
+    """税理士法。個別の税務判断を請け負う形にしない。"""
+    from src.config import Config
+    from src.processing.summarizer import Summarizer
+
+    s = Summarizer(Config.load())
+
+    class _Fake:
+        available = True
+        provider = "fake"
+
+        def generate_json(self, system, prompt, schema):
+            assert "お題" in prompt
+            assert "創作しない" in prompt
+            return {"title": "見出し", "body_markdown": "## 本文\n\n説明。"}
+
+    s.llm = _Fake()
+    article = s.write_from_theme("ふるさと納税の上限", "tax")
+
+    assert article is not None
+    assert article.generated_by == "fake"
+    assert "専門家" in article.body_markdown or "税理士" in article.body_markdown
+
+
+def test_draftコマンドが繋がっている():
+    """CLI から呼べること。"""
+    from src.pipeline import build_parser
+
+    args = build_parser().parse_args(["draft", "--theme", "テスト"])
+
+    assert args.theme == "テスト"
+    assert args.func.__name__ == "_cmd_draft"

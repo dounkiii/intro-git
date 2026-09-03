@@ -1,0 +1,84 @@
+# お題から記事を書いて note の下書きに保存する（手動起動）。
+#
+# **探索も動画も承認キューも通らない最短経路。** 「リサーチはいらない、記事だけ
+# 書いて下書きにしたい」という用途のために分けた。
+#
+# **公開はしない。** `src/pipeline.py draft` が呼ぶ `save_as_draft()` は PUT を
+# 持たないので、config の note_draft がどうであれ公開まで進まない。公開するか
+# どうかはオーナーが note の画面で決める。承認ゲート（CLAUDE.md）とは矛盾しない
+# ——**下書きは公開ではなく、むしろ人間のレビュー工程そのもの**だから。
+#
+# スマホの GitHub アプリから: Actions → note-draft → Run workflow → お題を入力
+name: note-draft
+
+on:
+  workflow_dispatch:
+    inputs:
+      theme:
+        description: 'お題（例: ふるさと納税の控除上限の決まり方）'
+        required: true
+        type: string
+      category:
+        description: 'カテゴリ'
+        required: false
+        default: tax
+        type: choice
+        options: [tax, household, subsidy, social_insurance]
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - run: pip install -q -r requirements.txt
+
+      - name: 記事を書いて下書き保存
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # 記事末尾の CTA と広告表示に使う。未設定なら CTA は出ない。
+          AFF_HUB_URL: ${{ secrets.AFF_HUB_URL }}
+          AFF_PRODUCT_URL: ${{ secrets.AFF_PRODUCT_URL }}
+          AFF_ACCOUNTING_SOFT: ${{ secrets.AFF_ACCOUNTING_SOFT }}
+          AFF_TAX_ADVISOR: ${{ secrets.AFF_TAX_ADVISOR }}
+          AFF_FURUSATO: ${{ secrets.AFF_FURUSATO }}
+          AFF_SECURITIES: ${{ secrets.AFF_SECURITIES }}
+          AFF_INSURANCE: ${{ secrets.AFF_INSURANCE }}
+          # note の認証。値はオーナーが Secrets に登録済みで、こちらは名前だけ。
+          NOTE_SESSION_V5: ${{ secrets.NOTE_SESSION_V5 }}
+          NOTE_GQL_AUTH_TOKEN: ${{ secrets.NOTE_GQL_AUTH_TOKEN }}
+          NOTE_XSRF_TOKEN: ${{ secrets.NOTE_XSRF_TOKEN }}
+          NOTE_EXTRA_COOKIES: ${{ secrets.NOTE_EXTRA_COOKIES }}
+        run: |
+          set -o pipefail
+          python -m src.pipeline draft \
+            --theme "${{ inputs.theme }}" \
+            --category "${{ inputs.category }}" 2>&1 | tee /tmp/draft.log
+
+      - name: 実行結果を記録して下書きIDを残す
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python -m src.pipeline oplog \
+            --workflow note-draft \
+            --status '${{ job.status }}' \
+            --log /tmp/draft.log \
+            --run-url '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add -A data/ops/ data/publish/
+          git diff --cached --quiet || {
+            git commit -m "chore: note の下書きを作成 (${{ job.status }})"
+            git pull --rebase --autostash origin "${{ github.ref_name }}"
+            git push
+          }

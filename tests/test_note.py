@@ -532,3 +532,85 @@ def test_レスポンスのログに認証情報を含めない(creds, store, mo
 
     assert "SECRET_SESSION_VALUE" not in caplog.text
     assert "SECRET_GQL_TOKEN" not in caplog.text
+
+
+# --- 下書き保存だけの経路 ----------------------------------------------------
+#
+# 「リサーチはいらない、記事だけ書いて下書きにしたい」用。探索も動画も承認キューも
+# 通らない。**公開はしない。**
+
+def test_下書き保存だけの経路は公開しない(creds, net, store):
+    """これが本題。`note_draft: false`（本公開設定）でも公開まで進まないこと。
+
+    設定を見て分岐させると、いつか誰かが false にした日に「下書きのつもりが
+    公開されていた」が起きる。save_as_draft は PUT を持たない。
+    """
+    config = Config.load()
+    config.section("publishing")["note_draft"] = False   # 本公開設定でも
+
+    result = NotePublisher(config, store=store).save_as_draft(_article())
+
+    assert result["draft"] is True
+    assert not any(c["method"] == "PUT" for c in net.calls), "公開している"
+    assert "editor.note.com" in result["url"]
+
+
+def test_下書き保存だけの経路にPUTのコードが無い():
+    """将来の実装変更で公開経路が混ざるのを防ぐ。
+
+    docstring を除いて判定する。除かないと「PUT を持たない」と説明に書いた
+    瞬間にテストが落ちる（tests/test_layer_contract.py の _code_of と同じ理由）。
+    """
+    import inspect
+
+    src = inspect.getsource(NotePublisher.save_as_draft)
+    body = src.split('"""')[2] if src.count('"""') >= 2 else src
+
+    assert "publish_note" not in body
+    assert "PUT" not in body
+    assert "status" not in body or "published" not in body
+
+
+def test_同じお題なら下書きを作り直さない(creds, net, store):
+    """同じお題で流し直すたびに下書きが増えると、note が散らかる。"""
+    p = NotePublisher(store=store)
+    p.save_as_draft(_article(), key="draft:ふるさと納税")
+    p.save_as_draft(_article(), key="draft:ふるさと納税")
+
+    created = [c for c in net.calls if c["url"] == API]
+
+    assert len(created) == 1
+
+
+def test_キーなしなら毎回新しい下書き(creds, net, store):
+    """--new のときは別の下書きにしたい。"""
+    p = NotePublisher(store=store)
+    p.save_as_draft(_article())
+    p.save_as_draft(_article())
+
+    created = [c for c in net.calls if c["url"] == API]
+
+    assert len(created) == 2
+
+
+def test_Secretが無ければ下書きも作らない(monkeypatch, store):
+    for name in (SESSION_ENV, GQL_ENV):
+        monkeypatch.delenv(name, raising=False)
+
+    result = NotePublisher(store=store).save_as_draft(_article())
+
+    assert result["skipped"] == "secrets_missing"
+
+
+def test_下書きワークフローは公開コマンドを呼ばない():
+    """ワークフロー側から承認済みの一括配信に化けていないこと。"""
+    import pathlib
+
+    raw = pathlib.Path(".github/workflows/note-draft.yml").read_text(
+        encoding="utf-8")
+    text = "\n".join(l for l in raw.splitlines()
+                     if not l.lstrip().startswith("#"))
+
+    assert "pipeline draft" in text
+    assert "publish --approved" not in text
+    assert "pipeline run" not in text

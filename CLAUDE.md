@@ -148,6 +148,30 @@ DevTools でのキャプチャ（PC作業）が必要で止まった。はてな
 `NoteIdStore`（`data/publish/note_ids.json`）で記事IDと note の id を対応づける。
 **持たないと毎晩の実行で同じ記事の下書きが1件ずつ増える。**
 
+### 下書き保存だけの経路（探索を通さない）
+
+「リサーチはいらない、記事だけ書いて下書きにしたい」用の最短経路。
+
+```bash
+python -m src.pipeline draft --theme "ふるさと納税の控除上限の決まり方"
+python -m src.pipeline draft --theme "..." --dry-run      # note に送らず本文だけ見る
+python -m src.pipeline draft --file 原稿.md               # 既存の Markdown を下書きに
+```
+
+スマホからは GitHub アプリ → Actions → **note-draft** → Run workflow でお題を入力。
+
+**公開はしない。** `NotePublisher.save_as_draft()` は PUT を持たないので、
+`note_draft` の設定に関わらず公開まで進まない。設定で分岐させると、いつか
+`note_draft: false` にした日に「下書きのつもりが公開されていた」が起きる。
+
+**承認ゲートと矛盾しない。** 下書きは公開ではなく、オーナーしか見られない。
+公開するかどうかは note の画面でオーナーが決める。**むしろこれが人間の
+レビュー工程そのもの。**
+
+同じお題で流し直したときは同じ下書きを更新する（`--new` で別の下書きにできる）。
+LLM が使えないときは**空の記事を作らずに失敗させる**。お題しか無い状態の
+テンプレ出力は中身が無いので、黙って空の下書きを置く方が悪い。
+
 ## 参考: はてなブログ（未使用）
 
 **note には記事投稿の公式 API が無い**（2026年時点で公開予定も未定）。自動投稿
@@ -249,7 +273,7 @@ Actions のログに頼らずリポジトリの中に記録を残す必要があ
 ## 開発コマンド
 
 ```bash
-pytest -q                                  # テスト（現在329件）
+pytest -q                                  # テスト（現在347件）
 python -m src.pipeline scout --sample      # 探索（APIキー不要）
 python -m src.pipeline run --sample        # 制作
 python -m src.pipeline report --days 7     # 週次レポート + 台帳

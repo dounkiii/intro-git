@@ -289,6 +289,41 @@ class NotePublisher:
         )
 
     # ------------------------------------------------------------------
+    def save_as_draft(self, article: Article, key: str = "") -> dict:
+        """記事を note の**下書きとして保存するだけ**。公開まで進まない。
+
+        **`publishing.note_draft` の設定に関わらず、絶対に公開しない。**
+        設定を見て分岐させると、いつか誰かが `note_draft: false` にした日に
+        「下書きのつもりが公開されていた」が起きる。この関数は PUT を持たない。
+
+        承認ゲート（`CLAUDE.md`）とは矛盾しません。**下書きは公開ではない**ので。
+        note の下書きはオーナーしか見られず、公開するかどうかはオーナーが
+        note の画面で決めます。むしろこれが人間のレビュー工程そのものです。
+        """
+        missing = self.missing()
+        if missing:
+            logger.warning("note へ保存しません。未設定の Secret: %s",
+                           ", ".join(missing))
+            return {"skipped": "secrets_missing", "missing": missing}
+
+        body_html, body_length = to_note_html(article.body_markdown)
+        note = self.store.get(key) if key else None
+        if note is None:
+            note = self.create_note()
+            if "error" in note:
+                return note
+            if key:
+                self.store.put(key, note)
+            logger.info("note の下書きを作成しました（id=%s）", note["id"])
+
+        saved = self.save_draft(note["id"], article.title, body_html, body_length)
+        if "error" in saved:
+            return saved
+
+        logger.info("note に下書き保存しました（id=%s）", note["id"])
+        return {"note_id": note["id"], "draft": True,
+                "url": _draft_url(note), "body_length": body_length}
+
     def publish(self, article: Article, item_id: str = "") -> dict:
         """記事を note に出す。出せないときは理由付きの dict を返す。
 

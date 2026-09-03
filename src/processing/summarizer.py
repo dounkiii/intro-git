@@ -189,6 +189,62 @@ class Summarizer:
 - 読者が次に何をすべきか1つに絞る"""
         return self.llm.generate_json(self._system_prompt(), prompt, ARTICLE_SCHEMA)
 
+    def write_from_theme(self, theme: str, category: str = "tax") -> Article | None:
+        """お題だけから記事を書く。**探索も動画も通さない。**
+
+        既存の `build_article()` は Topic（X の投稿から作った話題）と VideoScript を
+        要求する。「リサーチはいらない、記事だけ書いて下書きにしたい」という用途では
+        そこが邪魔になるので、入口を分けた。
+
+        LLM が使えないときは None を返す。ここでテンプレ生成にフォールバックしない
+        のは、**お題しか無い状態のテンプレ出力は中身が無い**から。黙って空の記事を
+        note の下書きに置くより、書けないと言う方がいい。
+        """
+        if not self.llm.available:
+            logger.error("LLM が使えないため記事を書けません。API キーの Secret を確認")
+            return None
+
+        block = self.affiliate.build(category, quiet=True)
+        prompt = f"""次のお題で、ブログ/note 用の解説記事を書いてください。
+
+お題: {theme}
+カテゴリ: {category}（{CATEGORY_LABEL.get(category, 'お金の話')}）
+
+【構成（この順番を守る）】
+1. 見出しなしの導入2〜3文（誰のどの困りごとの話か）
+2. `## 何が論点なのか`
+3. `## よくある詰まりどころ`（箇条書き3つ以上。読者が実際につまずく順に）
+4. `## どう動けばいいか`（手順として書く）
+
+【要件】
+- 1,200〜2,000字程度
+- body_markdown は Markdown。h1（#）は使わず h2（##）から始める
+- 末尾に CTA セクションは書かない（システム側で付与する）
+- 断定的な税務・投資助言をしない。「一般的な制度の説明」に留める
+- **具体的な数値・期限・料率を創作しない。** 元資料が無いお題なので、
+  数字が必要な箇所は「最新の公式情報で要確認」と書く
+- 読者が次に何をすべきか1つに絞る"""
+
+        data = self.llm.generate_json(self._system_prompt(), prompt, ARTICLE_SCHEMA)
+        if not data:
+            logger.error("記事の生成に失敗しました（お題: %s）", theme)
+            return None
+
+        body = data.get("body_markdown", "")
+        cta = self.affiliate.article_cta_section(block)
+        if cta:
+            body = f"{body.rstrip()}\n\n{cta}\n"
+        if block.liability_note and block.liability_note not in body:
+            body = f"{body.rstrip()}\n\n{block.liability_note}\n"
+
+        return Article(
+            topic_category=category,
+            title=data.get("title") or theme,
+            body_markdown=body,
+            monetization_route=block.route_summary,
+            generated_by=self.llm.provider,
+        )
+
     # --- 組み立て -------------------------------------------------------
     def _script_from_data(self, topic: Topic, data: dict,
                           block: MonetizationBlock) -> VideoScript:
