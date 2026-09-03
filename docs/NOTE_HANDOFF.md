@@ -6,7 +6,83 @@
 
 ---
 
-## 0. 先に読むべきもの
+## 0. 基本情報（このリポジトリについて）
+
+```
+リポジトリ    https://github.com/dounkiii/intro-git   （public）
+ブランチ      claude/mobile-automation-side-income-59tccj  ← これがデフォルトブランチ
+言語          Python 3.11 / 3.12
+オーナー      dounkiii
+```
+
+**このリポジトリは public です。** 認証情報を絶対にファイルに書かないでください。
+Actions のログも public に見えます。
+
+### 何をするプロジェクトか
+
+税金・補助金・社会保険などの話題を毎朝ひろって記事を自動生成し、**人間が承認した
+ものだけ**を note と GitHub Pages に公開する。アフィリエイトで収益化する。
+オーナーは通勤中にスマホで `/approve` を押すだけ、という前提で設計されている。
+
+```
+探索（毎朝）→ 生成（毎朝）→ 承認待ち Issue
+   → オーナーが GitHub アプリで /approve
+   → note に公開 ＋ サイトに公開
+```
+
+### セットアップ
+
+```bash
+git clone https://github.com/dounkiii/intro-git
+cd intro-git
+git checkout claude/mobile-automation-side-income-59tccj
+
+python3 -m venv .venv
+.venv/bin/pip install -q -r requirements.txt
+.venv/bin/pytest -q            # 336件通ればOK。ネットワーク不要
+```
+
+`ffmpeg` は動画生成にだけ必要（OSパッケージ）。**note の作業には要りません。**
+無ければ絵コンテJSONにフォールバックするので、落ちません。
+
+### ディレクトリ
+
+```
+src/publishers/     公開先ごとの実装
+  note.py             note（今回の担当）
+  note_body.py        記事Markdown → note本文HTML
+  site.py             GitHub Pages
+  hatena.py           はてなブログ（未使用・残置）
+  review_queue.py     承認キュー
+  github_issue.py     承認Issueの生成とコマンド解釈
+src/scout/          ネタ探索と採点（★凍結。触らない）
+src/pipeline.py     CLI とオーケストレーション
+data/               状態ファイル。**意図的にコミットしている**
+  review_queue/       承認待ち・承認済みの記事
+  publish/note_ids.json  記事ID → note の id 対応表（消さない）
+  ops/runs.jsonl      各ワークフローの実行記録
+.github/workflows/  自動実行
+docs/               設計と運用の記録
+```
+
+**`data/` をコミットしているのは意図的です。** Actions のランナーは実行ごとに
+破棄されるので、「生成 → 承認 → 投稿」を跨いだ状態をリポジトリに残す必要がある。
+
+### コミットとテスト
+
+```bash
+.venv/bin/pytest -q            # 必ず通してからコミット
+git pull --rebase --autostash origin claude/mobile-automation-side-income-59tccj
+git push -u origin claude/mobile-automation-side-income-59tccj
+```
+
+**テストが実データを書き換えると `tests/conftest.py` のガードが落とします。**
+出力先は `tmp_path` に逃がしてください（過去に2回、テストが本番の記事を
+上書きする事故を起こしています）。
+
+---
+
+## 0.5 先に読むべきもの
 
 | 順 | ファイル | 何が書いてあるか |
 |---|---|---|
